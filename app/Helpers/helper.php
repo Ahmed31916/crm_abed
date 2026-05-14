@@ -1631,7 +1631,6 @@ if (!function_exists('check_file')) {
 
             // Unknown storage type
             return false;
-
         } catch (\Exception $e) {
             // Log error for debugging
             Log::error('check_file error: ' . $e->getMessage(), [
@@ -1859,4 +1858,333 @@ if (!function_exists('getImageUrlPrefix')) {
                 return url('');
         }
     }
+
+    if (!function_exists('getSuperAdminCompanyId')) {
+        /**
+         * Get the super admin company ID (equivalent of getSuperAdminStoreId in old project)
+         * In the new CRM, the super admin's own user ID serves as the "store ID" for shared products
+         *
+         * @return int
+         */
+        function getSuperAdminCompanyId()
+        {
+            return \App\Models\User::where('type', 'superadmin')
+                ->orWhere('type', 'super admin')
+                ->value('id') ?? 1;
+        }
+    }
+
+    if (!function_exists('getVisibleCompanyIds')) {
+        /**
+         * Get the list of company IDs whose products should be visible to the current user.
+         * - Super admin sees all companies + own products
+         * - Company user sees own products + super admin products
+         * - Staff user sees products assigned to them + super admin products
+         *
+         * @return array
+         */
+        function getVisibleCompanyIds()
+        {
+            $user = auth()->user();
+
+            if (!$user) {
+                return [];
+            }
+
+            if ($user->isSuperAdmin()) {
+                return \App\Models\User::where('type', 'company')
+                    ->pluck('id')
+                    ->push($user->id)
+                    ->toArray();
+            }
+
+            $superAdminId = getSuperAdminCompanyId();
+
+            if ($user->type === 'company') {
+                return [$user->id, $superAdminId];
+            }
+
+            $companyId = $user->created_by ?? createdBy();
+            return [$companyId, $superAdminId];
+        }
+    }
+
+    if (!function_exists('isCompanyUser')) {
+        function isCompanyUser($user = null)
+        {
+            $user = $user ?? auth()->user();
+            return $user && $user->type === 'company';
+        }
+    }
+
+    if (!function_exists('getProductLimit')) {
+        function getProductLimit($user = null)
+        {
+            $user = $user ?? auth()->user();
+
+            if ($user->isSuperAdmin()) {
+                return null;
+            }
+
+            return $user->product_limit ?? 10;
+        }
+    }
+
+    if (!function_exists('hasReachedProductLimit')) {
+        function hasReachedProductLimit($user = null)
+        {
+            $user = $user ?? auth()->user();
+
+            if ($user->isSuperAdmin()) {
+                return false;
+            }
+
+            $limit = getProductLimit($user);
+            if ($limit === null) {
+                return false;
+            }
+
+            $currentCount = \App\Models\Product::where('created_by', $user->type === 'company' ? $user->id : createdBy())
+                ->count();
+
+            return $currentCount >= $limit;
+        }
+    }
+
+    if (!function_exists('isSuperAdminProduct')) {
+        function isSuperAdminProduct($product)
+        {
+            return $product->created_by == getSuperAdminCompanyId();
+        }
+    }
+
+    if (!function_exists('canAccessProduct')) {
+        function canAccessProduct($product)
+        {
+            if (auth()->user()->isSuperAdmin()) {
+                return true;
+            }
+            return in_array($product->created_by, getVisibleCompanyIds());
+        }
+    }
+
+    if (!function_exists('canEditProduct')) {
+        function canEditProduct($product)
+        {
+            if (auth()->user()->isSuperAdmin()) {
+                return true;
+            }
+            return $product->created_by == createdBy();
+        }
+    }
+
+    if (!function_exists('canDeleteProduct')) {
+        function canDeleteProduct($product)
+        {
+            if (auth()->user()->isSuperAdmin()) {
+                return true;
+            }
+            return $product->created_by == createdBy();
+        }
+    }
+ 
+    if (!function_exists('getCompanyBySlug')) {
+        /**
+         * Get company (User with type='company') by slug.
+         *
+         * دالة مساعدة للـ API العام
+         * القديم: Store::where('slug', $slug)
+         * الجديد: User::where('slug', $slug)->where('type', 'company')
+         *
+         * @param string $slug
+         * @return \App\Models\User|null
+         */
+        function getCompanyBySlug($slug)
+        {
+            return \App\Models\User::where('slug', $slug)
+                ->where('type', 'company')
+                ->first();
+        }
+    }
+
+    if (!function_exists('generateCompanySlug')) {
+        /**
+         * Generate a unique slug for a company user.
+         *
+         * توليد slug فريد للشركة (يُستخدم عند إنشاء شركة جديدة)
+         *
+         * @param string $name
+         * @return string
+         */
+        function generateCompanySlug($name)
+        {
+            $slug = \Illuminate\Support\Str::slug($name);
+            $originalSlug = $slug;
+            $count = 1;
+
+            while (\App\Models\User::where('slug', $slug)->exists()) {
+                $slug = $originalSlug . '-' . $count;
+                $count++;
+            }
+
+            return $slug;
+        }
+    }
+
+    if (!function_exists('getMergedProductData')) {
+    /**
+     * Merge product base data with health product data and company overrides.
+     *
+     * مطابقة تماماً لـ getMergedProductData في المشروع القديم
+     *
+     * Architecture:
+     * - health_products: بيانات صحية (سوبر أدمن أو الشركة)
+     * - product_company_overrides: تعديلات الشركة على منتجات السوبر أدمن
+     *
+     * أولوية البيانات:
+     * 1. Product (الأساس)
+     * 2. HealthProduct (بيانات صحية إضافية)
+     * 3. ProductCompanyOverride (تعديلات الشركة على منتجات السوبر أدمن)
+     * 4. Tags من pivot (أولوية تاجات الشركة)
+     *
+     * @param \App\Models\Product $product
+     * @param int|null $companyId معرف الشركة (إذا null يستخدم createdBy())
+     * @return object|null
+     */
+    function getMergedProductData($product, $companyId = null)
+    {
+        if (!$product) {
+            return null;
+        }
+
+        $companyId = $companyId ?? createdBy();
+        $superAdminId = getSuperAdminCompanyId();
+
+        // ========================================================================
+        // 1. تحميل HealthProduct مع أولوية الشركة
+        // ========================================================================
+        $health = \App\Models\HealthProduct::getForProduct($product->id, $companyId);
+
+        // ========================================================================
+        // 2. تحميل Override للشركة
+        // ========================================================================
+        $override = null;
+        if ($product->created_by == $superAdminId) {
+            $override = \App\Models\ProductCompanyOverride::where('product_id', $product->id)
+                ->where('company_id', $companyId)
+                ->first();
+        }
+
+        // ========================================================================
+        // 3. بناء البيانات المدمجة
+        // ========================================================================
+        $mergedProduct = $product->toArray();
+        $mergedHealth = $health ? $health->toArray() : [];
+
+        // ========================================================================
+        // 4. تطبيق Override على الحقول القابلة للتعديل
+        // ========================================================================
+        if ($override) {
+            // ──── Product overrides ────
+            if ($override->description !== null) {
+                $mergedProduct['description'] = $override->description;
+            }
+            if ($override->price_override !== null) {
+                $mergedProduct['price'] = $override->price_override;
+            }
+            if ($override->sale_price_override !== null) {
+                $mergedProduct['sale_price'] = $override->sale_price_override;
+            }
+            if ($override->stock_quantity_override !== null) {
+                $mergedProduct['stock_quantity'] = $override->stock_quantity_override;
+            }
+            if ($override->stock_status_override !== null) {
+                $mergedProduct['stock_status'] = $override->stock_status_override;
+            }
+            if ($override->category_id !== null) {
+                $mergedProduct['category_id'] = $override->category_id;
+            }
+
+            // ──── Health Product overrides ────
+            if ($override->contraindications !== null) {
+                $mergedHealth['contraindications'] = $override->contraindications;
+            }
+            if ($override->research_links !== null) {
+                $mergedHealth['research_links'] = $override->research_links;
+            }
+            if ($override->primary_indications !== null) {
+                $mergedHealth['primary_indications'] = $override->primary_indications;
+            }
+
+            // ──── Dosing overrides ────
+            if ($override->dosing_na) {
+                // Override يعطل كل الجرعات
+                $mergedHealth['dosing_upon_rising']      = null;
+                $mergedHealth['dosing_breakfast']         = null;
+                $mergedHealth['dosing_between_meals_am']  = null;
+                $mergedHealth['dosing_lunch']             = null;
+                $mergedHealth['dosing_between_meals_pm']  = null;
+                $mergedHealth['dosing_dinner']            = null;
+                $mergedHealth['dosing_before_sleep']      = null;
+                $mergedHealth['dosing_na']                = true;
+            } else {
+                if ($override->dosing_upon_rising !== null)      $mergedHealth['dosing_upon_rising']      = $override->dosing_upon_rising;
+                if ($override->dosing_breakfast !== null)         $mergedHealth['dosing_breakfast']         = $override->dosing_breakfast;
+                if ($override->dosing_between_meals_am !== null)  $mergedHealth['dosing_between_meals_am']  = $override->dosing_between_meals_am;
+                if ($override->dosing_lunch !== null)             $mergedHealth['dosing_lunch']             = $override->dosing_lunch;
+                if ($override->dosing_between_meals_pm !== null)  $mergedHealth['dosing_between_meals_pm']  = $override->dosing_between_meals_pm;
+                if ($override->dosing_dinner !== null)            $mergedHealth['dosing_dinner']            = $override->dosing_dinner;
+                if ($override->dosing_before_sleep !== null)      $mergedHealth['dosing_before_sleep']      = $override->dosing_before_sleep;
+                $mergedHealth['dosing_na'] = $override->dosing_na ?? ($health?->dosing_na ?? false);
+            }
+
+            // ──── Practitioner exclusive fields ────
+            $mergedHealth['practitioner_notes']         = $override->practitioner_notes;
+            $mergedHealth['custom_primary_indications'] = $override->custom_primary_indications;
+            $mergedHealth['custom_dosing_notes']        = $override->custom_dosing_notes;
+        } else {
+            // بدون override
+            $mergedHealth['practitioner_notes']         = null;
+            $mergedHealth['custom_primary_indications'] = null;
+            $mergedHealth['custom_dosing_notes']        = null;
+        }
+
+        // ========================================================================
+        // 5. Tags من Pivot (أولوية تاجات الشركة)
+        // ========================================================================
+        $mergedProduct['tag_names'] = $product->getTagNames($companyId);
+
+        // ========================================================================
+        // 6. معلومات الصورة
+        // ========================================================================
+        $mergedProduct['image_url'] = !empty($mergedHealth['product_image_url'])
+            ? $mergedHealth['product_image_url']
+            : ($product->getFirstMediaUrl('main') ?: null);
+
+        // ========================================================================
+        // 7. معلومات التصنيف والعلامة التجارية
+        // ========================================================================
+        $mergedProduct['category_name'] = $product->category->name ?? null;
+        $mergedProduct['brand_name'] = $product->brand->name ?? null;
+
+        // ========================================================================
+        // 8. حساب التسعير
+        // ========================================================================
+        $price = (float) ($mergedProduct['price'] ?? 0);
+        $salePrice = (float) ($mergedProduct['sale_price'] ?? 0);
+        $hasDiscount = ($salePrice > 0 && $salePrice < $price);
+        $mergedProduct['has_discount'] = $hasDiscount;
+        $mergedProduct['discount_percentage'] = $hasDiscount
+            ? round((($price - $salePrice) / $price) * 100, 2)
+            : 0;
+        $mergedProduct['final_price'] = $hasDiscount ? $salePrice : $price;
+
+        // ========================================================================
+        // 9. هل المنتج مشترك؟
+        // ========================================================================
+        $mergedProduct['is_shared_product'] = $product->created_by == $superAdminId;
+
+        return (object) array_merge($mergedProduct, ['health' => (object) $mergedHealth]);
+    }
+}
 }

@@ -10,6 +10,7 @@ use App\Models\Opportunity;
 use App\Models\Quote;
 use App\Models\SalesOrder;
 use App\Models\Invoice;
+use App\Models\Product;
 use App\Models\PurchaseOrder;
 use App\Observers\UserObserver;
 use App\Observers\PlanObserver;
@@ -19,6 +20,7 @@ use App\Observers\OpportunityObserver;
 use App\Observers\QuoteObserver;
 use App\Observers\SalesOrderObserver;
 use App\Observers\InvoiceObserver;
+use App\Observers\ProductObserver;
 use App\Observers\PurchaseOrderObserver;
 use App\Providers\AssetServiceProvider;
 use Illuminate\Support\ServiceProvider;
@@ -74,5 +76,7 @@ class AppServiceProvider extends ServiceProvider
         } catch (\Exception $e) {
             // Silently fail during migrations or when database is not ready
         }
+
+        Product::observe(ProductObserver::class);
     }
 }

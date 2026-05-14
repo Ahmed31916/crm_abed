@@ -97,6 +97,7 @@ use App\Http\Controllers\StreamController;
 use App\Http\Controllers\DocumentTypeController;
 use App\Http\Controllers\NoteController;
 use App\Http\Controllers\AnnouncementController;
+use App\Http\Controllers\Api\ProductApiController;
 use App\Http\Controllers\LeadCommentController;
 use App\Http\Controllers\OpportunityCommentController;
 use App\Http\Controllers\InvoiceStripePaymentController;
@@ -309,6 +310,24 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
         Route::get('dashboard/redirect', [DashboardController::class, 'redirectToFirstAvailablePage'])->name('dashboard.redirect');
 
+        Route::middleware('permission:manage-products')->group(function () {
+            Route::resource('tags', App\Http\Controllers\TagController::class);
+
+            // AJAX endpoints لربط/فصل التاجات بالمنتجات
+            Route::post('tags/{tag}/attach-product', [App\Http\Controllers\TagController::class, 'attachProduct'])
+                ->name('tags.attach-product');
+            Route::post('tags/{tag}/detach-product', [App\Http\Controllers\TagController::class, 'detachProduct'])
+                ->name('tags.detach-product');
+            Route::post('tags/sync-product-tags', [App\Http\Controllers\TagController::class, 'syncProductTags'])
+                ->name('tags.sync-product-tags');
+
+            // JSON endpoints لـ dropdowns و API
+            Route::get('tags/list', [App\Http\Controllers\TagController::class, 'list'])
+                ->name('tags.list');
+            Route::get('tags/product/{productId}', [App\Http\Controllers\TagController::class, 'productTags'])
+                ->name('tags.product-tags');
+        });
+
         Route::get('media-library', function () {
             $planLimits = null;
             if (auth()->user()->type === 'company') {
@@ -332,7 +351,15 @@ Route::middleware(['auth', 'verified'])->group(function () {
             ]);
         })->middleware('permission:manage-media')->name('media-library');
 
-
+        Route::prefix('company-notifications')->name('company-notifications.')->group(function () {
+            Route::get('/', [App\Http\Controllers\CompanyNotificationController::class, 'index'])->name('index');
+            Route::get('/unread-count', [App\Http\Controllers\CompanyNotificationController::class, 'unreadCount'])->name('unread-count');
+            Route::get('/recent', [App\Http\Controllers\CompanyNotificationController::class, 'recent'])->name('recent');
+            Route::put('/{id}/mark-read', [App\Http\Controllers\CompanyNotificationController::class, 'markAsRead'])->name('mark-read');
+            Route::put('/mark-all-read', [App\Http\Controllers\CompanyNotificationController::class, 'markAllAsRead'])->name('mark-all-read');
+            Route::delete('/{id}', [App\Http\Controllers\CompanyNotificationController::class, 'destroy'])->name('destroy');
+            Route::delete('/delete-all', [App\Http\Controllers\CompanyNotificationController::class, 'deleteAll'])->name('delete-all');
+        });
 
         // Media Library API routes
         Route::get('api/media', [MediaController::class, 'index'])->middleware('permission:manage-media')->name('api.media.index');
@@ -389,6 +416,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::put('users/{user}/reset-password', [UserController::class, 'resetPassword'])->middleware('permission:reset-password-users')->name('users.reset-password');
             Route::put('users/{user}/toggle-status', [UserController::class, 'toggleStatus'])->middleware('permission:toggle-status-users')->name('users.toggle-status');
             Route::get('users-logs', [UserController::class, 'allUserLogs'])->middleware('permission:view-users')->name('users.all-logs');
+
+            Route::put('users/{user}/product-limit', [UserController::class, 'updateProductLimit'])
+                ->middleware('permission:edit-users')
+                ->name('users.update-product-limit');
         });
 
         // Plans management routes (admin only)
@@ -504,6 +535,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::post('products/file/parse', [ProductController::class, 'parseFile'])->middleware('permission:import-products')->name('product.parse');
             Route::post('products/file/import', [ProductController::class, 'fileImport'])->middleware('permission:import-products')->name('product.import');
             Route::get('products/download/template', [ProductController::class, 'downloadTemplate'])->name('product.download.template');
+
+            Route::prefix('product-overrides')->name('product-overrides.')->group(function () {
+                Route::post('/', [ProductController::class, 'updateOverride'])->name('store');
+                Route::put('/{productId}', [ProductController::class, 'updateOverride'])->name('update');
+            });
         });
 
         // Reports routes
@@ -727,8 +763,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::get('api/opportunities/{opportunity}/details', [QuoteController::class, 'getOpportunityDetails'])->name('api.opportunities.details');
         });
 
+
         // Sales Order routes
         Route::middleware('permission:manage-sales-orders')->group(function () {
+            Route::get('sales-orders', [SalesOrderController::class, 'index'])->name('sales-orders.index');
             Route::get('sales-orders', [SalesOrderController::class, 'index'])->middleware('permission:manage-sales-orders')->name('sales-orders.index');
             Route::get('sales-orders/{salesOrder}', [SalesOrderController::class, 'show'])->middleware('permission:view-sales-orders')->name('sales-orders.show');
             Route::post('sales-orders', [SalesOrderController::class, 'store'])->middleware('permission:create-sales-orders')->name('sales-orders.store');
@@ -1060,7 +1098,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         });
 
         Route::post('impersonate/leave', [ImpersonateController::class, 'leave'])->name('impersonate.leave');
-    });// End plan.access middleware group
+    }); // End plan.access middleware group
 });
 
 require __DIR__ . '/settings.php';
@@ -1172,4 +1210,24 @@ Route::get('/cookie-consent/download', [CookieConsentController::class, 'downloa
 // Invoice template preview route (authenticated)
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('invoices/preview/{templateId}/{color}', [InvoiceController::class, 'previewTemplate'])->name('invoice.preview');
+});
+
+
+Route::prefix('api')->group(function () {
+
+    // جلب قائمة المنتجات لشركة معينة
+    // GET /api/{slug}/vital-products
+    Route::get('/{slug}/vital-products/list', [ProductApiController::class, 'vitalProductList']);
+
+    // جلب تفاصيل منتج واحد
+    // GET /api/{slug}/products/{productId}
+    Route::get('/{slug}/vital-products/{productId}', [ProductApiController::class, 'vitalProductShow']);
+
+    // جلب قائمة التاجات لشركة معينة
+    // GET /api/{slug}/tags
+    Route::get('/{slug}/tags', [ProductApiController::class, 'vitalTagsList']);
+
+    // جلب معلومات الشركة العامة
+    // GET /api/{slug}/info
+    Route::get('/{slug}/info', [ProductApiController::class, 'vitalCompanyInfo']);
 });

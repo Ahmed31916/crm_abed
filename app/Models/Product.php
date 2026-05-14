@@ -31,12 +31,16 @@ class Product extends BaseModel implements HasMedia
         'status',
         'created_by',
         'assigned_to',
+        'stock_status',
+        'sale_price',
     ];
 
     protected $casts = [
         'price' => 'decimal:2',
         'additional_images' => 'array',
         'additional_image_ids' => 'array',
+        'stock_status' => 'string',
+        'sale_price'   => 'decimal:2',
     ];
 
     protected $appends = ['main_image_url', 'additional_image_urls'];
@@ -109,7 +113,7 @@ class Product extends BaseModel implements HasMedia
 
     public function getDefaultImageUrl()
     {
-        return $this->image ?: config('app.url').'/storage/media/product/default.svg';
+        return $this->image ?: config('app.url') . '/storage/media/product/default.svg';
     }
 
     public function getAdditionalImageUrlsAttribute()
@@ -169,4 +173,186 @@ class Product extends BaseModel implements HasMedia
 
         return $array;
     }
+    public function companyOverrides()
+    {
+        return $this->hasMany(\App\Models\ProductCompanyOverride::class);
+    }
+
+    public function getOverrideForCompany($companyId)
+    {
+        return \App\Models\ProductCompanyOverride::where('product_id', $this->id)
+            ->where('company_id', $companyId)
+            ->first();
+    }
+
+    public function outboxEvents()
+    {
+        return $this->hasMany(\App\Models\ProductEventOutbox::class);
+    }
+
+    public function tags()
+    {
+        return $this->belongsToMany(\App\Models\Tag::class, 'product_tags')
+            ->withPivot('created_by')
+            ->withTimestamps();
+    }
+
+
+    /**
+     * جلب أسماء التاجات للمنتج مع أولوية الشركة
+     * الشركة تشوف تاجاتها أولاً، إذا ما عندش يرجع لتاجات السوبر أدمن
+     *
+     * @param int|null $companyId إذا null يستخدم createdBy()
+     * @return array
+     */
+    public function getTagNames(?int $companyId = null): array
+    {
+        $companyId = $companyId ?? createdBy();
+        $superAdminId = getSuperAdminCompanyId();
+
+        // الأولوية: تاجات الشركة
+        $companyTagIds = \DB::table('product_tags')
+            ->where('product_id', $this->id)
+            ->where('created_by', $companyId)
+            ->pluck('tag_id')
+            ->toArray();
+
+        if (!empty($companyTagIds)) {
+            return \App\Models\Tag::whereIn('id', $companyTagIds)->pluck('name')->toArray();
+        }
+
+        // Fallback: تاجات السوبر أدمن
+        $superAdminTagIds = \DB::table('product_tags')
+            ->where('product_id', $this->id)
+            ->where('created_by', $superAdminId)
+            ->pluck('tag_id')
+            ->toArray();
+
+        if (!empty($superAdminTagIds)) {
+            return \App\Models\Tag::whereIn('id', $superAdminTagIds)->pluck('name')->toArray();
+        }
+
+        return [];
+    }
+
+    /**
+     * جلب التاجات المرئية للمستخدم الحالي (للـ API)
+     *
+     * @param int $companyId
+     * @return \Illuminate\Database\Eloquent\Collection
+     */
+    public function getVisibleTags(int $companyId): \Illuminate\Database\Eloquent\Collection
+    {
+        $superAdminId = getSuperAdminCompanyId();
+
+        // تاجات الشركة
+        $companyTagIds = \DB::table('product_tags')
+            ->where('product_id', $this->id)
+            ->where('created_by', $companyId)
+            ->pluck('tag_id')
+            ->toArray();
+
+        if (!empty($companyTagIds)) {
+            return \App\Models\Tag::whereIn('id', $companyTagIds)->get();
+        }
+
+        // Fallback: تاجات السوبر أدمن
+        $superAdminTagIds = \DB::table('product_tags')
+            ->where('product_id', $this->id)
+            ->where('created_by', $superAdminId)
+            ->pluck('tag_id')
+            ->toArray();
+
+        return \App\Models\Tag::whereIn('id', $superAdminTagIds)->get();
+    }
+
+    /**
+     * البيانات الصحية للمنتج
+     * واحد لواحد: كل منتج له سجل health_product واحد لكل مستخدم
+     *
+     * في المشروع القديم: كان healthProduct() بيشيل أول سجل فقط
+     * في المشروع الجديد: بنستخدم HealthProduct::getForProduct() عشان نراعي الأولوية
+     */
+    public function healthProduct()
+    {
+        return $this->hasOne(\App\Models\HealthProduct::class);
+    }
+
+    /**
+     * كل سجلات HealthProduct للمنتج (للسوبر أدمن + كل الشركات)
+     */
+    public function healthProducts()
+    {
+        return $this->hasMany(\App\Models\HealthProduct::class);
+    }
+
+// ========================================================================
+// 5. Accessor لحساب السعر النهائي
+// ========================================================================
+
+    /**
+     * Get the final price (sale price if discount exists, otherwise regular price)
+     */
+    public function getFinalPriceAttribute(): float
+    {
+        $salePrice = (float) ($this->sale_price ?? 0);
+        $price = (float) $this->price;
+
+        if ($salePrice > 0 && $salePrice < $price) {
+            return $salePrice;
+        }
+
+        return $price;
+    }
+
+    /**
+     * Check if product has a discount
+     */
+    public function getHasDiscountAttribute(): bool
+    {
+        $salePrice = (float) ($this->sale_price ?? 0);
+        $price = (float) $this->price;
+
+        return $salePrice > 0 && $salePrice < $price;
+    }
+
+    /**
+     * Get discount percentage
+     */
+    public function getDiscountPercentageAttribute(): float
+    {
+        if (!$this->has_discount) {
+            return 0;
+        }
+
+        $price = (float) $this->price;
+        $salePrice = (float) $this->sale_price;
+
+        return round((($price - $salePrice) / $price) * 100, 2);
+    }
+
+    // public function registerMediaCollections(): void
+    // {
+    //     $this->addMediaCollection('main')
+    //         ->singleFile();
+
+    //     $this->addMediaCollection('additional');
+    // }
+
+
+    /**
+     * Get the main image URL
+     */
+    // public function getMainImageUrlAttribute(): ?string
+    // {
+    //     return $this->getFirstMediaUrl('main') ?: null;
+    // }
+
+    /**
+     * Get additional image URLs
+     */
+    // public function getAdditionalImageUrlsAttribute(): array
+    // {
+    //     return $this->getMedia('additional')->map(fn($media) => $media->getUrl())->toArray();
+    // }
 }

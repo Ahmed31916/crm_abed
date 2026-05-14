@@ -19,21 +19,38 @@ class SalesOrderController extends Controller
 {
     public function index(Request $request)
     {
+        if (!auth()->user()->isSuperAdmin()) {
+            abort(403, 'Unauthorized');
+        }
+
         $query = SalesOrder::query()
-            ->with(['quote', 'account', 'billingContact', 'shippingContact', 'shippingProviderType', 'creator', 'assignedUser', 'products.tax'])
-            ->where(function($q) {
+            ->with(['quote', 'account', 'billingContact', 'shippingContact', 'shippingProviderType', 'creator', 'assignedUser', 'products.tax']);
+
+        // ==========================================
+        // SUPER ADMIN SEES ALL ORDERS FROM ALL COMPANIES
+        // ==========================================
+        if (auth()->user()->isSuperAdmin()) {
+            // Super admin sees ALL orders - no company filter
+            // Optional: filter by specific company
+            if ($request->has('company_id') && !empty($request->company_id) && $request->company_id !== 'all') {
+                $query->where('created_by', $request->company_id);
+            }
+        } else {
+            // Company user or staff: filter by created_by
+            $query->where(function ($q) {
                 if (auth()->user()->type === 'company') {
                     $q->where('created_by', createdBy());
                 } else {
                     $q->where('assigned_to', auth()->id());
                 }
             });
+        }
 
         if ($request->has('search') && !empty($request->search)) {
-            $query->where(function($q) use ($request) {
+            $query->where(function ($q) use ($request) {
                 $q->where('order_number', 'like', '%' . $request->search . '%')
-                  ->orWhere('name', 'like', '%' . $request->search . '%')
-                  ->orWhereHas('account', fn($q) => $q->where('name', 'like', '%' . $request->search . '%'));
+                    ->orWhere('name', 'like', '%' . $request->search . '%')
+                    ->orWhereHas('account', fn($q) => $q->where('name', 'like', '%' . $request->search . '%'));
             });
         }
 
@@ -55,7 +72,7 @@ class SalesOrderController extends Controller
 
         $sortField = $request->input('sort_field', 'id');
         $sortDirection = $request->input('sort_direction', 'desc');
-        $allowedSorts=['id', 'order_number', 'name', 'order_date', 'created_at'];
+        $allowedSorts = ['id', 'order_number', 'name', 'order_date', 'created_at'];
         $allowedDirection = ['asc', 'desc'];
         if (!in_array($sortDirection, $allowedDirection)) {
             $sortDirection = 'desc';
@@ -75,20 +92,30 @@ class SalesOrderController extends Controller
                 ->get();
         }
 
+        // ==========================================
+        // COMPANIES LIST FOR SUPER ADMIN FILTER
+        // ==========================================
+        $companies = [];
+        if (auth()->user()->isSuperAdmin()) {
+            $companies = \App\Models\User::where('type', 'company')
+                ->select('id', 'name', 'email')
+                ->get();
+        }
+
         return Inertia::render('sales-orders/index', [
             'salesOrders' => $salesOrders,
             'accounts' => Account::where('created_by', createdBy())
-                ->when(auth()->user()->type !== 'company', function($q) {
+                ->when(auth()->user()->type !== 'company', function ($q) {
                     $q->where('assigned_to', auth()->id());
                 })
                 ->select('id', 'name')->get(),
             'contacts' => Contact::where('created_by', createdBy())
-                ->when(auth()->user()->type !== 'company', function($q) {
+                ->when(auth()->user()->type !== 'company', function ($q) {
                     $q->where('assigned_to', auth()->id());
                 })
                 ->select('id', 'name')->get(),
             'quotes' => Quote::where('created_by', createdBy())
-                ->when(auth()->user()->type !== 'company', function($q) {
+                ->when(auth()->user()->type !== 'company', function ($q) {
                     $q->where('assigned_to', auth()->id());
                 })
                 ->select('id', 'name', 'quote_number')->get(),
@@ -96,7 +123,9 @@ class SalesOrderController extends Controller
             'shippingProviderTypes' => ShippingProviderType::where('created_by', createdBy())->select('id', 'name')->active()->get(),
             'taxes' => Tax::where('created_by', createdBy())->select('id', 'name', 'rate')->get(),
             'users' => $users,
-            'filters' => $request->all(['search', 'status', 'account_id', 'assigned_to', 'sort_field', 'sort_direction', 'per_page']),
+            'companies' => $companies,
+            'isSuperAdmin' => auth()->user()->isSuperAdmin(),
+            'filters' => $request->all(['search', 'status', 'account_id', 'assigned_to', 'company_id', 'sort_field', 'sort_direction', 'per_page']),
             'publicUrlBase' => config('app.url'),
             'encryptedSalesOrderIds' => $salesOrders->getCollection()->mapWithKeys(function ($salesOrder) {
                 return [$salesOrder->id => encrypt($salesOrder->id)];
@@ -106,8 +135,7 @@ class SalesOrderController extends Controller
 
     public function show($salesOrderId)
     {
-        $salesOrder = SalesOrder::where('id', $salesOrderId)
-            ->where('created_by', createdBy())
+        $query = SalesOrder::where('id', $salesOrderId)
             ->with([
                 'quote',
                 'account',
@@ -119,8 +147,14 @@ class SalesOrderController extends Controller
                 'assignedUser',
                 'products.tax',
                 'activities.user'
-            ])
-            ->first();
+            ]);
+
+        // Super admin can see any order
+        if (!auth()->user()->isSuperAdmin()) {
+            $query->where('created_by', createdBy());
+        }
+
+        $salesOrder = $query->first();
 
         if (!$salesOrder) {
             return redirect()->route('sales-orders.index')->with('error', __('Sales order not found.'));
@@ -135,17 +169,17 @@ class SalesOrderController extends Controller
     public function create()
     {
         $accounts = Account::where('created_by', createdBy())
-            ->when(auth()->user()->type !== 'company', function($q) {
+            ->when(auth()->user()->type !== 'company', function ($q) {
                 $q->where('assigned_to', auth()->id());
             })
             ->select('id', 'name')->get();
         $contacts = Contact::where('created_by', createdBy())
-            ->when(auth()->user()->type !== 'company', function($q) {
+            ->when(auth()->user()->type !== 'company', function ($q) {
                 $q->where('assigned_to', auth()->id());
             })
             ->select('id', 'name')->get();
         $quotes = Quote::where('created_by', createdBy())
-            ->when(auth()->user()->type !== 'company', function($q) {
+            ->when(auth()->user()->type !== 'company', function ($q) {
                 $q->where('assigned_to', auth()->id());
             })
             ->select('id', 'name', 'quote_number')->get();
@@ -185,21 +219,21 @@ class SalesOrderController extends Controller
             'assignedUser',
             'products.tax'
         ])
-        ->where('created_by', createdBy())
-        ->findOrFail($id);
+            ->where('created_by', createdBy())
+            ->findOrFail($id);
 
         $accounts = Account::where('created_by', createdBy())
-            ->when(auth()->user()->type !== 'company', function($q) {
+            ->when(auth()->user()->type !== 'company', function ($q) {
                 $q->where('assigned_to', auth()->id());
             })
             ->select('id', 'name')->get();
         $contacts = Contact::where('created_by', createdBy())
-            ->when(auth()->user()->type !== 'company', function($q) {
+            ->when(auth()->user()->type !== 'company', function ($q) {
                 $q->where('assigned_to', auth()->id());
             })
             ->select('id', 'name')->get();
         $quotes = Quote::where('created_by', createdBy())
-            ->when(auth()->user()->type !== 'company', function($q) {
+            ->when(auth()->user()->type !== 'company', function ($q) {
                 $q->where('assigned_to', auth()->id());
             })
             ->select('id', 'name', 'quote_number')->get();
@@ -262,7 +296,6 @@ class SalesOrderController extends Controller
         $validated['created_by'] = createdBy();
         $validated['status'] = $validated['status'] ?? 'draft';
 
-        // Auto-assign to current user if staff user
         if (auth()->user()->type !== 'company') {
             $validated['assigned_to'] = auth()->id();
         }
@@ -293,12 +326,10 @@ class SalesOrderController extends Controller
 
         $salesOrder->calculateTotals();
 
-        // Fire SalesOrderCreated event for sending email
         if ($salesOrder && !IsDemo()) {
             event(new \App\Events\SalesOrderCreated($salesOrder));
         }
 
-        // Check for errors
         $emailError = session()->pull('email_error');
 
         if ($emailError) {
@@ -349,7 +380,6 @@ class SalesOrderController extends Controller
             'products.*.discount_value' => 'nullable|numeric|min:0',
         ]);
 
-        // Auto-assign to current user if staff user
         if (auth()->user()->type !== 'company') {
             $validated['assigned_to'] = auth()->id();
         }
@@ -388,7 +418,9 @@ class SalesOrderController extends Controller
     public function destroy($salesOrderId)
     {
         $salesOrder = SalesOrder::where('id', $salesOrderId)
-            ->where('created_by', createdBy())
+            ->when(!auth()->user()->isSuperAdmin(), function ($q) {
+                $q->where('created_by', createdBy());
+            })
             ->first();
 
         if (!$salesOrder) {
@@ -404,7 +436,9 @@ class SalesOrderController extends Controller
     public function toggleStatus($salesOrderId)
     {
         $salesOrder = SalesOrder::where('id', $salesOrderId)
-            ->where('created_by', createdBy())
+            ->when(!auth()->user()->isSuperAdmin(), function ($q) {
+                $q->where('created_by', createdBy());
+            })
             ->first();
 
         if (!$salesOrder) {
@@ -416,8 +450,6 @@ class SalesOrderController extends Controller
 
         return redirect()->back()->with('success', __('Sales order status updated successfully.'));
     }
-
-
 
     public function assignUser(Request $request, $salesOrderId)
     {
@@ -455,23 +487,40 @@ class SalesOrderController extends Controller
         return 0;
     }
 
+    /**
+     * Get filtered products with multi-company visibility.
+     * Company users see their own products + super admin products.
+     */
     private function getFilteredProducts()
     {
-        if (auth()->user()->type === 'company') {
-            return Product::where('created_by', createdBy())->with('tax')->select('id', 'name', 'price', 'tax_id')->get();
-        } else {
-            return Product::where('created_by', createdBy())
-                ->where('assigned_to', auth()->id())
-                ->with('tax')
-                ->select('id', 'name', 'price', 'tax_id')
-                ->get();
+        $visibleCompanyIds = getVisibleCompanyIds();
+        $currentCompanyId = createdBy();
+
+        $query = Product::whereIn('created_by', $visibleCompanyIds)
+            ->with('tax')
+            ->select('id', 'name', 'price', 'tax_id', 'created_by');
+
+        if (!auth()->user()->isSuperAdmin()) {
+            // For staff users, further filter by assignment
+            if (auth()->user()->type !== 'company') {
+                $query->where(function ($q) {
+                    $q->where('assigned_to', auth()->id())
+                        ->orWhere('created_by', getSuperAdminCompanyId());
+                });
+            }
+            // Prioritize own products
+            $query->orderByRaw('CASE WHEN created_by = ? THEN 0 ELSE 1 END', [$currentCompanyId]);
         }
+
+        return $query->get();
     }
 
     public function deleteActivities($salesOrderId)
     {
         $salesOrder = SalesOrder::where('id', $salesOrderId)
-            ->where('created_by', createdBy())
+            ->when(!auth()->user()->isSuperAdmin(), function ($q) {
+                $q->where('created_by', createdBy());
+            })
             ->first();
 
         if (!$salesOrder) {
@@ -486,7 +535,9 @@ class SalesOrderController extends Controller
     public function deleteActivity($salesOrderId, $activityId)
     {
         $salesOrder = SalesOrder::where('id', $salesOrderId)
-            ->where('created_by', createdBy())
+            ->when(!auth()->user()->isSuperAdmin(), function ($q) {
+                $q->where('created_by', createdBy());
+            })
             ->first();
 
         if (!$salesOrder) {

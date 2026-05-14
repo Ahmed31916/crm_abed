@@ -50,7 +50,9 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
         'trial_expire_date',
         'active_module',
         'commission_amount',
-        'invoice_template'
+        'invoice_template',
+        'product_limit',
+        'slug',
     ];
 
     /**
@@ -81,6 +83,7 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
             'is_enable_login' => 'integer',
             'google2fa_enable' => 'integer',
             'storage_limit' => 'float',
+            'product_limit' => 'integer',
         ];
     }
 
@@ -322,6 +325,36 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
                 }
             }
         });
+
+        static::creating(function ($user) {
+            if (empty($user->slug) && in_array($user->type, ['company', 'superadmin', 'super admin'])) {
+                $slug = \Illuminate\Support\Str::slug($user->name);
+                $originalSlug = $slug;
+                $count = 1;
+
+                while (self::where('slug', $slug)->exists()) {
+                    $slug = $originalSlug . '-' . $count;
+                    $count++;
+                }
+
+                $user->slug = $slug;
+            }
+        });
+
+        static::updating(function ($user) {
+            if ($user->isDirty('name') && in_array($user->type, ['company', 'superadmin', 'super admin'])) {
+                $slug = \Illuminate\Support\Str::slug($user->name);
+                $originalSlug = $slug;
+                $count = 1;
+
+                while (self::where('slug', $slug)->where('id', '!=', $user->id)->exists()) {
+                    $slug = $originalSlug . '-' . $count;
+                    $count++;
+                }
+
+                $user->slug = $slug;
+            }
+        });
     }
 
     public function companyDefaultData($company)
@@ -473,5 +506,67 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
     public function getAvatarAttribute($value)
     {
         return check_file($value) ? get_file($value) : get_file('avatars/avatar.png');
+    }
+
+    public function getProductCountAttribute()
+    {
+        return \App\Models\Product::where('created_by', $this->id)->count();
+    }
+
+    /**
+     * Check if this company user has reached their product creation limit
+     */
+    public function hasReachedProductLimit()
+    {
+        if ($this->isSuperAdmin()) {
+            return false;
+        }
+
+        $limit = $this->product_limit ?? 10;
+        $currentCount = $this->product_count;
+
+        return $currentCount >= $limit;
+    }
+
+    /**
+     * Get the product limit with default fallback
+     */
+    public function getProductLimitAttribute($value)
+    {
+        return $value ?? 10;
+    }
+
+    /**
+     * Get notifications for this company user
+     */
+    public function companyNotifications()
+    {
+        return $this->hasMany(\App\Models\CompanyNotification::class, 'company_id');
+    }
+
+    /**
+     * Get unread notifications count for this company user
+     */
+    public function unreadNotificationsCount()
+    {
+        return $this->companyNotifications()->unread()->count();
+    }
+
+    /**
+     * Get product overrides created by this company user
+     */
+    public function productOverrides()
+    {
+        return $this->hasMany(\App\Models\ProductCompanyOverride::class, 'company_id');
+    }
+
+    /**
+     * Get the route key for the model.
+     * يسمح باستخدام slug في Route Model Binding
+     * مثال: route('company.profile', $company) يستخدم slug بدل id
+     */
+    public function getRouteKeyName(): string
+    {
+        return 'slug';
     }
 }

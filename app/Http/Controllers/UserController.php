@@ -51,7 +51,7 @@ class UserController extends BaseController
         // Handle sorting
         $sortField = $request->input('sort_field', 'id');
         $sortDirection = $request->input('sort_direction', 'desc');
-        $allowedSorts=['id', 'name', 'created_at'];
+        $allowedSorts = ['id', 'name', 'created_at'];
         $allowedDirection = ['asc', 'desc'];
         if (!in_array($sortDirection, $allowedDirection)) {
             $sortDirection = 'desc';
@@ -63,7 +63,15 @@ class UserController extends BaseController
         // Handle pagination
         $perPage = $request->has('per_page') ? (int)$request->per_page : 10;
         $users = $userQuery->paginate((int)$perPage)->withQueryString();
-
+        // Add product count for companies (super admin view)
+        if (auth()->user()->isSuperAdmin()) {
+            $users->each(function ($user) {
+                if ($user->type === 'company') {
+                    $user->product_count = \App\Models\Product::where('created_by', $user->id)->count();
+                    // product_limit already exists on the user model
+                }
+            });
+        }
         # Roles listing - Get roles based on user type
         if ($authUser->type === 'company') {
             $roles = Role::where('created_by', $authUser->id)->get();
@@ -101,6 +109,7 @@ class UserController extends BaseController
             'users' => $users,
             'roles' => $roles,
             'planLimits' => $planLimits,
+            'isSuperAdmin' => auth()->user()->isSuperAdmin(),
             'filters' => $request->only(['search', 'role', 'sort_field', 'sort_direction', 'per_page', 'view', 'page'])
         ]);
     }
@@ -314,4 +323,25 @@ class UserController extends BaseController
     }
 
     // switchBusiness method removed
+
+    /**
+     * Update the product limit for a specific company user.
+     * Only super admin can update product limits.
+     */
+    public function updateProductLimit(Request $request, User $user)
+    {
+        if (!auth()->user()->isSuperAdmin()) {
+            abort(403, 'Unauthorized Access Prevented');
+        }
+
+        $request->validate([
+            'product_limit' => 'required|integer|min:1',
+        ]);
+
+        $user->update([
+            'product_limit' => $request->product_limit,
+        ]);
+
+        return redirect()->back()->with('success', __('Product limit updated successfully.'));
+    }
 }
