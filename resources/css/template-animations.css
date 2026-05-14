@@ -1,0 +1,9 @@
+@keyframes scroll-y {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-50%); }
+}
+
+.animate-scroll-y {
+  animation: scroll-y 8s ease-in-out forwards;
+  will-change: transform;
+}

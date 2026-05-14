@@ -1,0 +1,98 @@
+[
+    {
+        "code": "en",
+        "name": "English",
+        "countryCode": "GB",
+        "enabled": true
+    },
+    {
+        "code": "es",
+        "name": "Español",
+        "countryCode": "ES",
+        "enabled": true
+    },
+    {
+        "code": "ar",
+        "name": "العربية",
+        "countryCode": "SA",
+        "enabled": true
+    },
+    {
+        "code": "da",
+        "name": "Dansk",
+        "countryCode": "DK",
+        "enabled": true
+    },
+    {
+        "code": "de",
+        "name": "Deutsch",
+        "countryCode": "DE",
+        "enabled": true
+    },
+    {
+        "code": "fr",
+        "name": "Français",
+        "countryCode": "FR",
+        "enabled": true
+    },
+    {
+        "code": "he",
+        "name": "עברית",
+        "countryCode": "IL",
+        "enabled": true
+    },
+    {
+        "code": "it",
+        "name": "Italiano",
+        "countryCode": "IT",
+        "enabled": true
+    },
+    {
+        "code": "ja",
+        "name": "日本語",
+        "countryCode": "JP",
+        "enabled": true
+    },
+    {
+        "code": "nl",
+        "name": "Nederlands",
+        "countryCode": "NL",
+        "enabled": true
+    },
+    {
+        "code": "pl",
+        "name": "Polski",
+        "countryCode": "PL",
+        "enabled": true
+    },
+    {
+        "code": "pt",
+        "name": "Português",
+        "countryCode": "PT",
+        "enabled": true
+    },
+    {
+        "code": "pt-BR",
+        "name": "Português do Brasil",
+        "countryCode": "BR",
+        "enabled": true
+    },
+    {
+        "code": "ru",
+        "name": "Русский",
+        "countryCode": "RU",
+        "enabled": true
+    },
+    {
+        "code": "tr",
+        "name": "Türkçe",
+        "countryCode": "TR",
+        "enabled": true
+    },
+    {
+        "code": "zh",
+        "name": "中文",
+        "countryCode": "CN",
+        "enabled": true
+    }
+]

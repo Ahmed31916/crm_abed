@@ -1,0 +1,227 @@
+/* Dashboard Responsive Styles */
+
+/* Mobile First Approach */
+@media (max-width: 640px) {
+  /* Mobile: Stack metrics vertically */
+  .dashboard-metrics {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  
+  /* Mobile: Reduce card padding */
+  .dashboard-card {
+    padding: 1rem;
+  }
+  
+  /* Mobile: Smaller text sizes */
+  .dashboard-metric-title {
+    font-size: 1.5rem;
+  }
+  
+  /* Mobile: Stack chart sections */
+  .dashboard-charts {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  
+  /* Mobile: Reduce chart height */
+  .dashboard-chart {
+    height: 200px;
+  }
+  
+  /* Mobile: Stack activity sections */
+  .dashboard-activities {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  
+  /* Mobile: Limit activity height */
+  .dashboard-activity-list {
+    max-height: 250px;
+  }
+}
+
+/* Tablet Styles */
+@media (min-width: 641px) and (max-width: 1024px) {
+  /* Tablet: 2 columns for metrics */
+  .dashboard-metrics {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+  
+  /* Tablet: 2 columns for charts */
+  .dashboard-charts {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+  }
+  
+  /* Tablet: 2 columns for activities */
+  .dashboard-activities {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+  }
+}
+
+/* Desktop Styles */
+@media (min-width: 1025px) {
+  /* Desktop: 3 columns for metrics */
+  .dashboard-metrics {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+  }
+  
+  /* Desktop: 3 columns for charts */
+  .dashboard-charts {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+  }
+  
+  /* Desktop: 2 columns for activities */
+  .dashboard-activities {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+  }
+}
+
+/* Large Desktop Styles */
+@media (min-width: 1280px) {
+  /* Large Desktop: 6 columns for super admin metrics */
+  .superadmin-metrics {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 1rem;
+  }
+  
+  /* Large Desktop: 6 columns for company metrics */
+  .company-metrics {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 1rem;
+  }
+}
+
+/* Animation Classes */
+.dashboard-fade-in {
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+.dashboard-slide-up {
+  animation: slideUp 0.6s ease-out;
+}
+
+.dashboard-scale-in {
+  animation: scaleIn 0.4s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Hover Effects */
+.dashboard-card-hover {
+  transition: all 0.3s ease;
+}
+
+.dashboard-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
+/* Chart Responsive Containers */
+.dashboard-chart-container {
+  width: 100%;
+  height: 300px;
+}
+
+@media (max-width: 640px) {
+  .dashboard-chart-container {
+    height: 250px;
+  }
+}
+
+/* Activity List Scrolling */
+.dashboard-activity-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+}
+
+.dashboard-activity-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.dashboard-activity-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dashboard-activity-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.5);
+  border-radius: 2px;
+}
+
+.dashboard-activity-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.7);
+}
+
+/* Loading States */
+.dashboard-skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: loading 1.5s infinite;
+}
+
+@keyframes loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Dark Mode Adjustments */
+@media (prefers-color-scheme: dark) {
+  .dashboard-skeleton {
+    background: linear-gradient(90deg, #374151 25%, #4b5563 50%, #374151 75%);
+    background-size: 200% 100%;
+  }
+}
+
+/* Print Styles */
+@media print {
+  .dashboard-no-print {
+    display: none !important;
+  }
+  
+  .dashboard-print-break {
+    page-break-after: always;
+  }
+  
+  .dashboard-card {
+    break-inside: avoid;
+  }
+}

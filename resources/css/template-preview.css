@@ -1,0 +1,12 @@
+@keyframes scrollY {
+  0% {
+    transform: translateY(0) scale(0.85);
+  }
+  100% {
+    transform: translateY(-50%) scale(0.85);
+  }
+}
+
+.group:hover .group-hover\:animate-scroll-y > div {
+  animation: scrollY 8s ease-in-out forwards;
+}

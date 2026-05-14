@@ -1,0 +1,610 @@
+import { PageTemplate } from '@/components/page-template';
+import { usePage, Link, router } from '@inertiajs/react';
+import { ArrowLeft, Calendar, DollarSign, Package, User, Building, Truck, FileText, EyeOff, Trash2, Send, Edit, Check, X } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { useTranslation } from 'react-i18next';
+import { useState } from 'react';
+import { CrudDeleteModal } from '@/components/CrudDeleteModal';
+import { formatRelativeTime, getDisplayUrl } from '@/utils/helper';
+
+export default function PurchaseOrderShow() {
+  const { t } = useTranslation();
+  const { purchaseOrder, streamItems, auth } = usePage().props as any;
+  const isCompany = auth?.user?.type === 'company';
+  const [showStream, setShowStream] = useState(true);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleteAllModalOpen, setIsDeleteAllModalOpen] = useState(false);
+  const [currentActivity, setCurrentActivity] = useState<any>(null);
+  const [newComment, setNewComment] = useState('');
+  const [editingComment, setEditingComment] = useState<number | null>(null);
+  const [editCommentText, setEditCommentText] = useState('');
+
+  const breadcrumbs = [
+    { title: t('Dashboard'), href: route('dashboard') },
+    { title: t('Purchase Orders'), href: route('purchase-orders.index') },
+    { title: purchaseOrder.order_number }
+  ];
+
+  const getStatusBadge = (status: string) => {
+    const statusColors = {
+      draft: 'bg-gray-50 text-gray-600 ring-gray-500/10',
+      sent: 'bg-blue-50 text-blue-700 ring-blue-700/10',
+      confirmed: 'bg-green-50 text-green-700 ring-green-600/20',
+      received: 'bg-purple-50 text-purple-700 ring-purple-700/10',
+      cancelled: 'bg-red-50 text-red-700 ring-red-600/10'
+    };
+
+    return (
+      <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${statusColors[status as keyof typeof statusColors] || statusColors.draft}`}>
+        {t(status?.charAt(0).toUpperCase() + status?.slice(1)) || t('Draft')}
+      </span>
+    );
+  };
+
+  const formatCurrency = (amount: number) => window.appSettings?.formatCurrency(Number(amount || 0)) || `$${Number(amount || 0).toFixed(2)}`;
+
+  const formatDate = (dateString: string) => {
+    if (!dateString) return t('-');
+    return window.appSettings?.formatDateTime(dateString, false) || new Date(dateString).toLocaleDateString();
+  };
+
+  const calculateProductTotals = () => {
+    let subtotal = 0;
+    let totalTax = 0;
+    let totalDiscount = 0;
+
+    purchaseOrder.products?.forEach((product: any) => {
+      const lineTotal = Number(product.pivot.total_price) || 0;
+      const discountAmount = Number(product.pivot.discount_amount) || 0;
+      const finalLineTotal = lineTotal - discountAmount;
+
+      subtotal += finalLineTotal;
+      totalDiscount += discountAmount;
+
+      if (product.tax) {
+        totalTax += (finalLineTotal * Number(product.tax.rate)) / 100;
+      }
+    });
+
+    return { subtotal, totalTax, totalDiscount, grandTotal: subtotal + totalTax };
+  };
+
+  const { subtotal, totalTax, totalDiscount, grandTotal } = calculateProductTotals();
+
+  return (
+    <PageTemplate
+      title={purchaseOrder.order_number}
+      breadcrumbs={breadcrumbs}
+      actions={[
+        {
+          label: t('Back'),
+          icon: <ArrowLeft className="h-4 w-4 mr-2" />,
+          variant: 'outline',
+          onClick: () => window.history.back()
+        }
+      ]}
+    >
+      <div className="mx-auto space-y-6">
+        {/* Header Section */}
+        <div className="bg-white rounded-lg shadow-sm border p-8">
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <h1 className="text-lg font-bold">{purchaseOrder.name}</h1>
+              <p className="text-base text-gray-600 mt-2 leading-relaxed max-w-3xl">{purchaseOrder.description || t('No description provided')}</p>
+            </div>
+            <div className="text-right ml-6">
+              {getStatusBadge(purchaseOrder.status)}
+              <p className="text-sm font-medium text-gray-700 mt-2 font-mono">{purchaseOrder.order_number}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Summary Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card className="border-l-4 border-l-green-500">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">{t('Total Amount')}</p>
+                  <h3 className="mt-2 text-2xl font-bold text-green-600 leading-none">{formatCurrency(purchaseOrder.total_amount)}</h3>
+                </div>
+                <div className="rounded-full bg-green-100 p-4">
+                  <DollarSign className="h-5 w-5 text-green-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-l-4 border-l-blue-500">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">{t('Products')}</p>
+                  <h3 className="mt-2 text-2xl font-bold text-blue-600 leading-none">{purchaseOrder.products?.length || 0}</h3>
+                </div>
+                <div className="rounded-full bg-blue-100 p-4">
+                  <Package className="h-5 w-5 text-blue-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-l-4 border-l-orange-500">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">{t('Order Date')}</p>
+                  <h3 className="mt-2 text-lg font-bold text-purple-600 leading-tight">{window.appSettings?.formatDateTime(purchaseOrder.order_date, false) || new Date(purchaseOrder.order_date).toLocaleDateString()}</h3>
+                </div>
+                <div className="rounded-full bg-orange-100 p-4">
+                  <Calendar className="h-5 w-5 text-orange-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-l-4 border-l-purple-500">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">{t('Expected Delivery')}</p>
+                  <h3 className="mt-2 text-lg font-bold text-purple-600 leading-tight">{window.appSettings?.formatDateTime(purchaseOrder.expected_delivery_date, false) || new Date(purchaseOrder.expected_delivery_date).toLocaleDateString()}</h3>
+                </div>
+                <div className="rounded-full bg-purple-100 p-4">
+                  <Truck className="h-5 w-5 text-purple-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Purchase Order Information */}
+        <Card className="shadow-sm">
+          <CardHeader className="bg-gray-50 border-b">
+            <CardTitle className="text-lg font-semibold">{t('Purchase Order Information')}</CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-6">
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">{t('Order Number')}</label>
+                  <p className="text-sm mt-1">{purchaseOrder.order_number}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">{t('Status')}</label>
+                  <div className="mt-1">{getStatusBadge(purchaseOrder.status)}</div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">{t('Created By')}</label>
+                  <p className="text-sm mt-1">{purchaseOrder.creator?.name || t('-')}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">{t('Assigned To')}</label>
+                  <p className="text-sm mt-1">{purchaseOrder.assigned_user?.name || t('Unassigned')}</p>
+                </div>
+              </div>
+              <div className="space-y-6">
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">{t('Subtotal')}</label>
+                  <p className="text-sm mt-1">{formatCurrency(purchaseOrder.subtotal)}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">{t('Discount Amount')}</label>
+                  <p className="text-sm mt-1">-{formatCurrency(purchaseOrder.discount_amount)}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">{t('Created At')}</label>
+                  <p className="text-sm mt-1">{formatDate(purchaseOrder.created_at)}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">{t('Updated At')}</label>
+                  <p className="text-sm mt-1">{formatDate(purchaseOrder.updated_at)}</p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Related Data */}
+        <Card className="shadow-sm">
+          <CardHeader className="bg-gray-50 border-b">
+            <CardTitle className="flex items-center text-lg font-semibold">
+              <Building className="h-5 w-5 mr-3 text-muted-foreground" />
+              {t('Related Data')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-8">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {purchaseOrder.account && (
+                <div className="p-6 bg-green-50 rounded-xl border border-green-200 hover:shadow-md transition-shadow">
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">{t('Account')}</p>
+                  <Link
+                    href={route('accounts.show', purchaseOrder.account.id)}
+                    className="text-base font-medium text-green-700 hover:text-green-900 hover:underline transition-colors"
+                  >
+                    {purchaseOrder.account.name}
+                  </Link>
+                </div>
+              )}
+
+              {purchaseOrder.sales_order && (
+                <div className="p-6 bg-purple-50 rounded-xl border border-purple-200 hover:shadow-md transition-shadow">
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">{t('Sales Order')}</p>
+                  <Link
+                    href={route('sales-orders.show', purchaseOrder.sales_order.id)}
+                    className="text-base font-medium text-purple-700 hover:text-purple-900 hover:underline transition-colors"
+                  >
+                    {purchaseOrder.sales_order.name}
+                  </Link>
+                </div>
+              )}
+
+              {purchaseOrder.shipping_provider_type && (
+                <div className="p-6 bg-orange-50 rounded-xl border border-orange-200 hover:shadow-md transition-shadow">
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">{t('Shipping Provider')}</p>
+                  <Link
+                    href={route('shipping-provider-types.show', purchaseOrder.shipping_provider_type.id)}
+                    className="text-base font-medium text-orange-700 hover:text-orange-900 hover:underline transition-colors"
+                  >
+                    {purchaseOrder.shipping_provider_type.name}
+                  </Link>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Products */}
+        <Card className="shadow-sm">
+          <CardHeader className="bg-gray-50 border-b">
+            <CardTitle className="flex items-center text-lg font-semibold">
+              <Package className="h-5 w-5 mr-3 text-muted-foreground" />
+              {t('Products')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            {purchaseOrder.products && purchaseOrder.products.length > 0 ? (
+              <div className="overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-100">
+                      <TableHead className="text-base font-bold text-gray-900 py-4 px-6 w-1/3">{t('Product')}</TableHead>
+                      <TableHead className="text-right text-base font-bold text-gray-900 py-4 px-4">{t('Quantity')}</TableHead>
+                      <TableHead className="text-right text-base font-bold text-gray-900 py-4 px-4">{t('Unit Price')}</TableHead>
+                      <TableHead className="text-right text-base font-bold text-gray-900 py-4 px-4">{t('Discount')}</TableHead>
+                      <TableHead className="text-right text-base font-bold text-gray-900 py-4 px-4">{t('Tax')}</TableHead>
+                      <TableHead className="text-right text-base font-bold text-gray-900 py-4 px-4 w-1/6">{t('Total')}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {purchaseOrder.products.map((product: any, index: number) => {
+                      const lineTotal = Number(product.pivot.total_price) || 0;
+                      const discountAmount = Number(product.pivot.discount_amount) || 0;
+                      const finalTotal = lineTotal - discountAmount;
+
+                      return (
+                        <TableRow key={index} className="border-b hover:bg-gray-50">
+                          <TableCell className="font-semibold text-base text-gray-900 py-4 px-6">{product.name}</TableCell>
+                          <TableCell className="text-right text-base font-medium py-4 px-4">{product.pivot.quantity}</TableCell>
+                          <TableCell className="text-right text-base font-semibold py-4 px-4">{formatCurrency(product.pivot.unit_price)}</TableCell>
+                          <TableCell className="text-right py-4 px-4">
+                            {product.pivot.discount_type && product.pivot.discount_type !== 'none' && product.pivot.discount_value > 0 ? (
+                              <div className="text-base">
+                                <div className="font-semibold text-gray-700">{product.pivot.discount_type === 'percentage' ? `${Number(product.pivot.discount_value)}%` : formatCurrency(Number(product.pivot.discount_value))}</div>
+                                <div className="text-red-600 font-bold">(-{formatCurrency(discountAmount)})</div>
+                              </div>
+                            ) : (
+                              <span className="text-gray-500 font-medium">{t('No Discount')}</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right text-base py-4 px-4">
+                            {product.tax ? (
+                              <div className="text-base">
+                                <div className="font-semibold text-gray-700">{product.tax.name}</div>
+                                <div className="text-gray-600 font-medium">({product.tax.rate}%)</div>
+                              </div>
+                            ) : (
+                              <span className="text-gray-500 font-medium">{t('No Tax')}</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right font-bold text-base py-4 px-4">
+                            {discountAmount > 0 ? (
+                              <div>
+                                <div className="line-through text-gray-400 text-sm font-medium">{formatCurrency(lineTotal)}</div>
+                                <div className="text-green-600 font-semibold">{formatCurrency(finalTotal)}</div>
+                              </div>
+                            ) : (
+                              <span className="text-green-600 font-semibold">{formatCurrency(lineTotal)}</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    <TableRow className="bg-gray-50 border-t-2">
+                      <TableCell colSpan={5} className="text-right font-semibold text-base py-3 px-4">
+                        {t('Total Discount')}:
+                      </TableCell>
+                      <TableCell className="text-right font-semibold text-base text-red-600 py-3 px-4">
+                        -{formatCurrency(purchaseOrder.discount_amount)}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow className="bg-gray-50">
+                      <TableCell colSpan={5} className="text-right font-semibold text-base py-3 px-4">
+                        {t('Subtotal')}:
+                      </TableCell>
+                      <TableCell className="text-right font-semibold text-base py-3 px-4">
+                        {formatCurrency(purchaseOrder.subtotal)}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow className="bg-gray-50">
+                      <TableCell colSpan={5} className="text-right font-semibold text-base py-3 px-4">
+                        {t('Total Tax')}:
+                      </TableCell>
+                      <TableCell className="text-right font-semibold text-base py-3 px-4">
+                        {formatCurrency(purchaseOrder.tax_amount)}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow className="bg-green-50 border-t-2">
+                      <TableCell colSpan={5} className="text-right font-bold text-lg py-4 px-4">
+                        {t('Grand Total')}:
+                      </TableCell>
+                      <TableCell className="text-right py-4 px-4">
+                        <span className="text-green-600 font-bold text-xl">{formatCurrency(purchaseOrder.total_amount)}</span>
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="text-center py-16 text-gray-500">
+                <Package className="h-16 w-16 mx-auto mb-6 text-gray-300" />
+                <p className="text-lg font-medium">{t('No products added to this purchase order')}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Activity Stream */}
+        <Card className="shadow-sm">
+          <CardHeader className="bg-gray-50 border-b">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center text-lg font-semibold">
+                <Calendar className="h-5 w-5 mr-3 text-muted-foreground" />
+                {t('Activity Stream')}
+              </CardTitle>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowStream(!showStream)}
+                >
+                  <EyeOff className="h-4 w-4 mr-2" />
+                  {showStream ? t('Hide') : t('Show')}
+                </Button>
+                {streamItems && streamItems.length > 0 && isCompany && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setIsDeleteAllModalOpen(true)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    {t('Delete Stream')}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </CardHeader>
+          {showStream && (
+            <CardContent className="p-0">
+              {/* Add Comment Form */}
+              <div className="sticky top-0 bg-white z-10 p-6 pb-6 border-b mb-4">
+                <div className="flex gap-3">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full overflow-hidden border-2 border-gray-200">
+                    <img
+                      src={auth?.user?.avatar || getDisplayUrl('/images/avatar/avatar.png')}
+                      alt={auth?.user?.name || 'User'}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(auth?.user?.name || 'User')}&background=e5e7eb&color=374151&size=32`;
+                      }}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <form onSubmit={(e) => {
+                      e.preventDefault();
+                      if (newComment.trim()) {
+                        router.post(route('purchase-orders.comments.store', purchaseOrder.id), {
+                          comment: newComment
+                        }, {
+                          preserveScroll: true,
+                          onSuccess: () => setNewComment('')
+                        });
+                      }
+                    }}>
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder={t('Add a comment...')}
+                          value={newComment}
+                          onChange={(e) => setNewComment(e.target.value)}
+                          className="flex-1"
+                        />
+                        <Button
+                          type="submit"
+                          size="sm"
+                          disabled={!newComment.trim()}
+                        >
+                          <Send className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              </div>
+              <div className="p-6 pt-0 max-h-96 overflow-y-auto">
+              {streamItems && streamItems.length > 0 ? (
+                <div className="space-y-2">
+                {streamItems.map((activity: any, index: number) => {
+
+                  return (
+                    <div key={activity.id || index} className="flex gap-4">
+                      <div className="flex flex-col items-center">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-full overflow-hidden border-2 border-gray-200">
+                          <img
+                            src={activity.user?.avatar || getDisplayUrl('/images/avatar/avatar.png')}
+                            alt={activity.user?.name || 'User'}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(activity.user?.name || 'User')}&background=e5e7eb&color=374151&size=32`;
+                            }}
+                          />
+                        </div>
+                        {index < streamItems.length - 1 && <div className="w-px h-8 bg-gray-200 mt-2" />}
+                      </div>
+                      <div className="flex-1 min-w-0 pb-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-gray-400">
+                            {activity.user?.name || t('System')}
+                          </span>
+                          <span className="text-xs text-gray-500 font-medium">
+                            {formatRelativeTime(activity.created_at)}
+                          </span>
+                        </div>
+                        <div className="bg-white border rounded-lg p-3 shadow-sm">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium text-gray-900" dangerouslySetInnerHTML={{
+                              __html: activity.title.replace(
+                                new RegExp(`^(${activity.user?.name || 'System'})`, 'g'),
+                                '<span class="font-bold text-sm">$1</span>'
+                              )
+                            }} />
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium bg-gray-50 text-gray-700 ring-1 ring-inset ring-gray-600/20">
+                                {t(activity.activity_type.charAt(0).toUpperCase() + activity.activity_type.slice(1))}
+                              </span>
+                              {isCompany && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0 text-red-500 hover:text-red-700"
+                                  onClick={() => {
+                                    setCurrentActivity(activity);
+                                    setIsDeleteModalOpen(true);
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                          {activity.description && (
+                            <div className="mb-2">
+                              {activity.field_changed === 'status' || activity.field_changed === 'name' || activity.field_changed === 'assigned_to' || activity.description.includes('into') ? (
+                                <p className="text-sm text-gray-600" dangerouslySetInnerHTML={{
+                                  __html: activity.description
+                                }} />
+                              ) : activity.activity_type === 'comment' ? (
+                                <div>
+                                  {editingComment === activity.id ? (
+                                    <div className="flex gap-2">
+                                      <Input
+                                        value={editCommentText}
+                                        onChange={(e) => setEditCommentText(e.target.value)}
+                                        className="flex-1"
+                                      />
+                                      <Button
+                                        size="sm"
+                                        onClick={() => {
+                                          router.put(route('purchase-orders.comments.update-activity', { purchaseOrder: purchaseOrder.id, activity: activity.id }), {
+                                            comment: editCommentText
+                                          }, { preserveScroll: true });
+                                          setEditingComment(null);
+                                        }}
+                                      >
+                                        <Check className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => setEditingComment(null)}
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-start justify-between">
+                                      <p className="text-sm text-gray-600 flex-1">{activity.description}</p>
+                                      {activity.user_id === auth?.user?.id && (
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-6 w-6 p-0 text-gray-400 hover:text-gray-600"
+                                          onClick={() => {
+                                            setEditingComment(activity.id);
+                                            setEditCommentText(activity.description);
+                                          }}
+                                        >
+                                          <Edit className="h-3 w-3" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-sm text-gray-600">{activity.description}</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                  <p className="text-sm">{t('No activities found')}</p>
+                </div>
+              )}
+              </div>
+            </CardContent>
+          )}
+        </Card>
+      </div>
+
+      {/* Delete Activity Modal */}
+      <CrudDeleteModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        onConfirm={() => {
+          router.delete(route('purchase-orders.delete-activity', { purchaseOrder: purchaseOrder.id, activity: currentActivity.id }), {
+            preserveScroll: true
+          });
+          setIsDeleteModalOpen(false);
+        }}
+        itemName={t('this activity')}
+        entityName={t('activity')}
+      />
+
+      {/* Delete All Activities Modal */}
+      <CrudDeleteModal
+        isOpen={isDeleteAllModalOpen}
+        onClose={() => setIsDeleteAllModalOpen(false)}
+        onConfirm={() => {
+          router.delete(route('purchase-orders.delete-activities', purchaseOrder.id), {
+            preserveScroll: true
+          });
+          setIsDeleteAllModalOpen(false);
+        }}
+        itemName={t('all activities for {{name}}', { name: purchaseOrder.name })}
+        entityName={t('activities')}
+      />
+    </PageTemplate>
+  );
+}
