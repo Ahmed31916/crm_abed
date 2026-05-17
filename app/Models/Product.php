@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\FacadesDB;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
@@ -16,23 +18,41 @@ class Product extends BaseModel implements HasMedia
 
     protected $fillable = [
         'name',
-        'sku',
+        'slug',                 // ← جديد: URL slug
+        'sku',                  // للبحث والفهرسة (مكرر من health_products)
         'description',
+        'specification',        // ← جديد: من الـ migration الجديد
+        'detail',               // ← جديد: من الـ migration الجديد
+
+        // Pricing
         'price',
+        'sale_price',
+
+        // Stock
         'stock_quantity',
-        'image',
-        'main_image',
-        'main_image_id',
-        'additional_images',
-        'additional_image_ids',
+        'stock_status',         // in_stock, out_of_stock, on_backorder
+
+        // Product attributes
+        'product_weight',
+        'tax_id',
+        'tax_status',           // ← جديد: taxable, none
+
+        // Relations
         'category_id',
         'brand_id',
-        'tax_id',
-        'status',
+        'frequency',            // ← جديد: dosing frequency
+
+        // Flags
+        'status',               // active, inactive
+
+        // Ownership
         'created_by',
         'assigned_to',
-        'stock_status',
-        'sale_price',
+
+        // Spatie MediaLibrary
+        'main_image_id',
+        'additional_image_ids',
+        'message_id'
     ];
 
     protected $casts = [
@@ -41,9 +61,18 @@ class Product extends BaseModel implements HasMedia
         'additional_image_ids' => 'array',
         'stock_status' => 'string',
         'sale_price'   => 'decimal:2',
+        'product_weight' => 'decimal:2',
+        'stock_quantity' => 'integer',
     ];
 
     protected $appends = ['main_image_url', 'additional_image_urls'];
+
+    protected static function booted()
+    {
+        static::updating(function ($product) {
+            $product->message_id = ($product->message_id ?? 0) + 1;
+        });
+    }
 
     public function creator(): BelongsTo
     {
@@ -199,43 +228,6 @@ class Product extends BaseModel implements HasMedia
 
 
     /**
-     * جلب أسماء التاجات للمنتج مع أولوية الشركة
-     * الشركة تشوف تاجاتها أولاً، إذا ما عندش يرجع لتاجات السوبر أدمن
-     *
-     * @param int|null $companyId إذا null يستخدم createdBy()
-     * @return array
-     */
-    public function getTagNames(?int $companyId = null): array
-    {
-        $companyId = $companyId ?? createdBy();
-        $superAdminId = getSuperAdminCompanyId();
-
-        // الأولوية: تاجات الشركة
-        $companyTagIds = \DB::table('product_tags')
-            ->where('product_id', $this->id)
-            ->where('created_by', $companyId)
-            ->pluck('tag_id')
-            ->toArray();
-
-        if (!empty($companyTagIds)) {
-            return \App\Models\Tag::whereIn('id', $companyTagIds)->pluck('name')->toArray();
-        }
-
-        // Fallback: تاجات السوبر أدمن
-        $superAdminTagIds = \DB::table('product_tags')
-            ->where('product_id', $this->id)
-            ->where('created_by', $superAdminId)
-            ->pluck('tag_id')
-            ->toArray();
-
-        if (!empty($superAdminTagIds)) {
-            return \App\Models\Tag::whereIn('id', $superAdminTagIds)->pluck('name')->toArray();
-        }
-
-        return [];
-    }
-
-    /**
      * جلب التاجات المرئية للمستخدم الحالي (للـ API)
      *
      * @param int $companyId
@@ -246,7 +238,7 @@ class Product extends BaseModel implements HasMedia
         $superAdminId = getSuperAdminCompanyId();
 
         // تاجات الشركة
-        $companyTagIds = \DB::table('product_tags')
+        $companyTagIds = DB::table('product_tags')
             ->where('product_id', $this->id)
             ->where('created_by', $companyId)
             ->pluck('tag_id')
@@ -257,7 +249,7 @@ class Product extends BaseModel implements HasMedia
         }
 
         // Fallback: تاجات السوبر أدمن
-        $superAdminTagIds = \DB::table('product_tags')
+        $superAdminTagIds = DB::table('product_tags')
             ->where('product_id', $this->id)
             ->where('created_by', $superAdminId)
             ->pluck('tag_id')
@@ -331,28 +323,118 @@ class Product extends BaseModel implements HasMedia
         return round((($price - $salePrice) / $price) * 100, 2);
     }
 
-    // public function registerMediaCollections(): void
-    // {
-    //     $this->addMediaCollection('main')
-    //         ->singleFile();
+    public static function slugs($data)
+    {
+        $slug = '';
 
-    //     $this->addMediaCollection('additional');
-    // }
+        $slug = preg_replace('/[^\p{L}\p{N}\s-]/u', '', $data); // Remove special chars
+        // $slug = transliterator_transliterate('Any-Latin; Latin-ASCII', $slug); // Transliterate to Latin
+        $slug = strtolower(trim($slug)); // Convert to lowercase and trim
+        $slug = preg_replace('/\s+/', '-', $slug); // Replace spaces with hyphens
+        $slug = preg_replace('/-+/', '-', $slug); // Replace multiple hyphens with single hyphen
 
+        $table = with(new Product)->getTable();
+
+        $allSlugs = self::getRelatedSlugs($table, $slug, $id = 0);
+
+        if (!$allSlugs->contains('slug', $slug)) {
+            return $slug;
+        }
+        for ($i = 1; $i <= 100; $i++) {
+            $newSlug = $slug . '-' . $i;
+            if (!$allSlugs->contains('slug', $newSlug)) {
+                return $newSlug;
+            }
+        }
+    }
+
+    protected static function getRelatedSlugs($table, $slug, $id = 0)
+    {
+        return DB::table($table)->select()->where('slug', 'like', $slug . '%')->where('id', '<>', $id)->get();
+    }
+
+
+    public function getTagNames(?int $companyId = null): array
+    {
+        $companyId = $companyId ?? createdBy();
+        $superAdminId = getSuperAdminCompanyId();
+
+        // الأولوية: تاجات الشركة
+        $companyTagIds = DB::table('product_tags')
+            ->where('product_id', $this->id)
+            ->where('created_by', $companyId)
+            ->pluck('tag_id')
+            ->toArray();
+
+        if (!empty($companyTagIds)) {
+            return \App\Models\Tag::whereIn('id', $companyTagIds)->pluck('name')->toArray();
+        }
+
+        // Fallback: تاجات السوبر أدمن
+        $superAdminTagIds = DB::table('product_tags')
+            ->where('product_id', $this->id)
+            ->where('created_by', $superAdminId)
+            ->pluck('tag_id')
+            ->toArray();
+
+        if (!empty($superAdminTagIds)) {
+            return \App\Models\Tag::whereIn('id', $superAdminTagIds)->pluck('name')->toArray();
+        }
+
+        return [];
+    }
 
     /**
-     * Get the main image URL
+     * Products that pair well with this product
      */
-    // public function getMainImageUrlAttribute(): ?string
-    // {
-    //     return $this->getFirstMediaUrl('main') ?: null;
-    // }
+    public function pairsWellWith()
+    {
+        return $this->belongsToMany(\App\Models\Product::class, 'product_pairs', 'product_id', 'paired_product_id')
+            ->withPivot('created_by')
+            ->withTimestamps();
+    }
 
     /**
-     * Get additional image URLs
+     * Products this product is paired with (inverse)
      */
-    // public function getAdditionalImageUrlsAttribute(): array
-    // {
-    //     return $this->getMedia('additional')->map(fn($media) => $media->getUrl())->toArray();
-    // }
+    public function pairedWith()
+    {
+        return $this->belongsToMany(\App\Models\Product::class, 'product_pairs', 'paired_product_id', 'product_id')
+            ->withPivot('created_by')
+            ->withTimestamps();
+    }
+
+// ========================================================================
+// 4. Scopes
+// ========================================================================
+
+    /**
+     * Products visible to a specific company (own + super admin)
+     */
+    public function scopeVisibleTo($query, $companyId)
+    {
+        $superAdminId = getSuperAdminCompanyId();
+        return $query->where(function ($q) use ($companyId, $superAdminId) {
+            $q->where('created_by', $companyId)
+                ->orWhere('created_by', $superAdminId);
+        });
+    }
+
+    /**
+     * Active products only
+     */
+    public function scopeActive($query)
+    {
+        return $query->where('status', 'active');
+    }
+
+
+    // ========================================================================
+    // 8. Route key binding (optional - use slug in URLs)
+    // ========================================================================
+
+    public function getRouteKeyName(): string
+    {
+        return 'slug';
+    }
 }

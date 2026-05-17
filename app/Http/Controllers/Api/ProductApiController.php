@@ -501,7 +501,7 @@ class ProductApiController extends Controller
             'dosing_na'           => $dosingNa,
 
             // معرف الرسالة
-            'message_id'          => $product->slug ?? ('product-' . $product->id),
+            'message_id'          => $product->message_id
         ];
 
         // ──── بيانات إضافية لصفحة التفاصيل ────

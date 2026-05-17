@@ -29,6 +29,8 @@
         "mollie/mollie-api-php": "^3.1",
         "openai-php/client": "^0.14.0",
         "paytabscom/laravel_paytabs": "^1.9",
+        "php-amqplib/php-amqplib": "^3.7",
+        "phpoffice/phpspreadsheet": "*",
         "rachidlaasri/laravel-installer": "^4.1",
         "razorpay/razorpay": "^2.8",
         "spatie/laravel-medialibrary": "^11.13",

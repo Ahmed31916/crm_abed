@@ -2,6 +2,7 @@ import tailwindcss from '@tailwindcss/vite';
 import laravel from 'laravel-vite-plugin';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 
 function stripUseClientDirective(): import('vite').Plugin {
   return {
@@ -25,6 +26,7 @@ function stripUseClientDirective(): import('vite').Plugin {
 export default defineConfig({
     base: './',
     plugins: [
+        react(),
         laravel({
             input: ['resources/css/app.css', 'resources/css/dark-mode.css', 'resources/js/app.tsx'],
             ssr: 'resources/js/ssr.tsx',

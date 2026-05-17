@@ -519,6 +519,26 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::put('categories/{category}/toggle-status', [CategoryController::class, 'toggleStatus'])->middleware('permission:toggle-status-categories')->name('categories.toggle-status');
         });
 
+        // Merchant comparison (Company users - compare their overrides with super admin originals)
+        Route::get('products/merchant-comparison', [ProductController::class, 'merchantCompareResults'])
+            ->name('products.merchant-comparison');
+        Route::post('products/merchant-revert-field', [ProductController::class, 'merchantRevertField'])
+            ->name('products.merchant-revert-field');
+
+        // Provider comparison (Super Admin - compare local data with external provider API)
+        Route::get('products/compare-with-provider', [ProductController::class, 'compareWithProvider'])
+            ->name('products.compare-with-provider');
+        Route::get('products/provider-comparison', [ProductController::class, 'providerComparisonResults'])
+            ->name('products.provider-comparison');
+        Route::post('products/comparison/{id}/accept', [ProductController::class, 'acceptComparison'])
+            ->name('products.comparison.accept');
+        Route::post('products/comparison/{id}/reject', [ProductController::class, 'rejectComparison'])
+            ->name('products.comparison.reject');
+        Route::post('products/comparison/{productId}/accept-all', [ProductController::class, 'acceptAllProductChanges'])
+            ->name('products.comparison.accept-all');
+        Route::post('products/comparison/{productId}/reject-all', [ProductController::class, 'rejectAllProductChanges'])
+            ->name('products.comparison.reject-all');
+
         // Products routes
         Route::middleware('permission:manage-products')->group(function () {
             Route::get('products', [ProductController::class, 'index'])->middleware('permission:manage-products')->name('products.index');
@@ -1111,6 +1131,7 @@ Route::post('payments/easebuzz/callback', [EasebuzzPaymentController::class, 'ca
 Route::get('invoices/public/{invoice}', [InvoiceController::class, 'publicView'])->name('invoices.public');
 Route::get('invoice-payment/{method}', [InvoiceController::class, 'showPaymentPage'])->name('invoice.payment.page');
 
+
 // Public quote routes (outside authentication)
 Route::get('quotes/public/{quote}', [QuoteController::class, 'publicView'])->name('quotes.public');
 Route::get('sales-orders/public/{salesOrder}', [SalesOrderController::class, 'publicView'])->name('sales-orders.public');
@@ -1196,7 +1217,7 @@ Route::post('invoices/payment/ozow/callback', [InvoiceOzowPaymentController::cla
 Route::post('invoices/payment/cashfree/create-session', [\App\Http\Controllers\InvoiceCashfreePaymentController::class, 'createPaymentSession'])->name('invoice.cashfree.create-session');
 Route::post('invoices/payment/cashfree/verify-payment', [\App\Http\Controllers\InvoiceCashfreePaymentController::class, 'verifyPayment'])->name('invoice.cashfree.verify-payment');
 Route::post('invoices/payment/cashfree/webhook', [\App\Http\Controllers\InvoiceCashfreePaymentController::class, 'webhook'])->name('invoice.cashfree.webhook')->withoutMiddleware(\App\Http\Middleware\VerifyCsrfToken::class);
-
+Route::post('products/import-from-excel', [ProductController::class, 'importFromExcel'])->name('products.import-from-excel');
 // Invoice payment management routes (authenticated)
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('invoices/payments/{paymentId}/approve', [InvoiceController::class, 'approvePayment'])->name('invoice.payments.approve');

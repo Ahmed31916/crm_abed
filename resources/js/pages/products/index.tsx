@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { PageTemplate } from '@/components/page-template';
 import { usePage, router } from '@inertiajs/react';
-import { Plus, Eye, Edit, Trash2, MoreHorizontal, Package, Download, Upload, FileDown, FileUp, Lock } from 'lucide-react';
+import { Plus, Eye, Edit, Trash2, MoreHorizontal, Package, Download, Upload, FileDown, FileUp, Lock, ArrowRightLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -9,7 +9,7 @@ import { hasPermission } from '@/utils/authorization';
 import { CrudTable } from '@/components/CrudTable';
 import { CrudFormModal } from '@/components/CrudFormModal';
 import { CrudDeleteModal } from '@/components/CrudDeleteModal';
-import { ImportModal } from '@/components/ImportModal';
+import ImportExcelModal from '@/components/ImportExcelModal';
 import { toast } from '@/components/custom-toast';
 import { useTranslation } from 'react-i18next';
 import { Pagination } from '@/components/ui/pagination';
@@ -22,6 +22,7 @@ export default function Products() {
     const { auth, products, categories, brands, taxes, users, samplePath, filters: pageFilters = {} } = usePage().props as any;
     const permissions = auth?.permissions || [];
     const isCompany = auth?.user?.type === 'company';
+    const isSuperAdmin = auth?.user?.type === 'superadmin';
 
     // State
     const [searchTerm, setSearchTerm] = useState(pageFilters.search || '');
@@ -32,7 +33,7 @@ export default function Products() {
     const [showFilters, setShowFilters] = useState(false);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+    const [isImportExcelModalOpen, setIsImportExcelModalOpen] = useState(false);
     const [currentItem, setCurrentItem] = useState<any>(null);
     const [formMode, setFormMode] = useState<'create' | 'edit' | 'view'>('create');
 
@@ -230,13 +231,24 @@ export default function Products() {
         });
     }
 
-    // Add import button
-    if (hasPermission(permissions, 'import-products')) {
+    // Add Import from Excel button - SUPER ADMIN ONLY
+    if (isSuperAdmin) {
         pageActions.push({
-            label: t('Import'),
+            label: t('Import from Excel'),
             icon: <FileUp className="h-4 w-4 mr-2" />,
             variant: 'outline',
-            onClick: () => setIsImportModalOpen(true)
+            onClick: () => setIsImportExcelModalOpen(true)
+        });
+    }
+
+    // Add Compare button - COMPANY USERS ONLY
+    // يقارن بيانات الشركة مع بيانات السوبر ادمن الأصلية
+    if (isCompany) {
+        pageActions.push({
+            label: t('Compare My Data'),
+            icon: <ArrowRightLeft className="h-4 w-4 mr-2" />,
+            variant: 'outline',
+            onClick: () => router.visit(route('products.merchant-comparison'))
         });
     }
 
@@ -765,26 +777,10 @@ export default function Products() {
                 entityName={t('product')}
             />
 
-            {/* Import Modal */}
-            <ImportModal
-                isOpen={isImportModalOpen}
-                onClose={() => setIsImportModalOpen(false)}
-                title={t('Import Products from CSV/Excel')}
-                importRoute="product.import"
-                parseRoute="product.parse"
-                samplePath={samplePath}
-                importNotes={t('Ensure that the values entered for Category, Brand, Tax match the existing records in your system.')}
-                databaseFields={[
-                    { key: 'name', required: true },
-                    { key: 'sku', required: true },
-                    { key: 'description' },
-                    { key: 'price', required: true },
-                    { key: 'stock', required: true },
-                    { key: 'category' },
-                    { key: 'brand' },
-                    { key: 'tax' },
-                    { key: 'status' }
-                ]}
+            {/* Import from Excel Modal - Super Admin Only */}
+            <ImportExcelModal
+                open={isImportExcelModalOpen}
+                onClose={() => setIsImportExcelModalOpen(false)}
             />
 
         </PageTemplate>
