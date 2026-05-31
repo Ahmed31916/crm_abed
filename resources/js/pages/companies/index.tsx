@@ -8,7 +8,7 @@ import { SearchAndFilterBar } from '@/components/ui/search-and-filter-bar';
 import { Card } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Plus, Eye, Edit, Trash2, KeyRound, Lock, Unlock, ArrowUpRight, CreditCard, History, Info } from 'lucide-react';
+import { Plus, Eye, Edit, Trash2, KeyRound, Lock, Unlock, ArrowUpRight, CreditCard, History, Info, Copy, Check } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { toast } from '@/components/custom-toast';
 import { useInitials } from '@/hooks/use-initials';
@@ -42,12 +42,49 @@ export default function Companies() {
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [isResetPasswordModalOpen, setIsResetPasswordModalOpen] = useState(false);
     const [isUpgradePlanModalOpen, setIsUpgradePlanModalOpen] = useState(false);
+    const [isLicenseKeyModalOpen, setIsLicenseKeyModalOpen] = useState(false);
 
     const [currentCompany, setCurrentCompany] = useState<any>(null);
     const [availablePlans, setAvailablePlans] = useState<any[]>([]);
 
+    // License key state
+    const [licenseKey, setLicenseKey] = useState<string>('');
+    const [licenseCopied, setLicenseCopied] = useState(false);
 
     const [formMode, setFormMode] = useState<'create' | 'edit' | 'view'>('create');
+
+    // Check for license key in flash data on component mount / page refresh
+    // We extract flash from the already-destructured usePage().props at the top level
+    const pageProps = usePage().props as any;
+    const flashLicenseKey = pageProps.flash?.license_key;
+
+    useEffect(() => {
+        if (flashLicenseKey) {
+            setLicenseKey(flashLicenseKey);
+            setIsLicenseKeyModalOpen(true);
+        }
+    }, [flashLicenseKey]);
+
+    // Handle copy license key
+    const handleCopyLicenseKey = async () => {
+        try {
+            await navigator.clipboard.writeText(licenseKey);
+            setLicenseCopied(true);
+            setTimeout(() => setLicenseCopied(false), 2000);
+            toast.success(t('License key copied to clipboard'));
+        } catch {
+            // Fallback for older browsers
+            const textArea = document.createElement('textarea');
+            textArea.value = licenseKey;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+            setLicenseCopied(true);
+            setTimeout(() => setLicenseCopied(false), 2000);
+            toast.success(t('License key copied to clipboard'));
+        }
+    };
 
     // Check if any filters are active
     const hasActiveFilters = () => {
@@ -142,10 +179,21 @@ export default function Companies() {
                 onSuccess: (page) => {
                     setIsFormModalOpen(false);
                     toast.dismiss();
-                    if (page.props.flash.success) {
-                        toast.success(t(page.props.flash.success));
-                    } else if (page.props.flash.error) {
-                        toast.error(t(page.props.flash.error));
+
+                    const flash = page.props.flash as any;
+
+                    if (flash.license_key) {
+                        // Subscription was created - show the license key modal
+                        setLicenseKey(flash.license_key);
+                        setIsLicenseKeyModalOpen(true);
+                    }
+
+                    if (flash.success) {
+                        toast.success(t(flash.success));
+                    } else if (flash.error) {
+                        toast.error(t(flash.error));
+                    } else if (flash.warning) {
+                        toast.warning(t(flash.warning));
                     }
                 },
                 onError: (errors) => {
@@ -165,9 +213,9 @@ export default function Companies() {
                     setIsFormModalOpen(false);
                     toast.dismiss();
                     if (page.props.flash.success) {
-                        toast.success(t(page.props.flash.success));
+                        toast.success(t(page.props.flash.success as string));
                     } else if (page.props.flash.error) {
-                        toast.error(t(page.props.flash.error));
+                        toast.error(t(page.props.flash.error as string));
                     }
                 },
                 onError: (errors) => {
@@ -190,9 +238,9 @@ export default function Companies() {
                 setIsDeleteModalOpen(false);
                 toast.dismiss();
                 if (page.props.flash.success) {
-                    toast.success(t(page.props.flash.success));
+                    toast.success(t(page.props.flash.success as string));
                 } else if (page.props.flash.error) {
-                    toast.error(t(page.props.flash.error));
+                    toast.error(t(page.props.flash.error as string));
                 }
             },
             onError: (errors) => {
@@ -214,9 +262,9 @@ export default function Companies() {
                 setIsResetPasswordModalOpen(false);
                 toast.dismiss();
                 if (page.props.flash.success) {
-                    toast.success(t(page.props.flash.success));
+                    toast.success(t(page.props.flash.success as string));
                 } else if (page.props.flash.error) {
-                    toast.error(t(page.props.flash.error));
+                    toast.error(t(page.props.flash.error as string));
                 }
             },
             onError: (errors) => {
@@ -237,9 +285,9 @@ export default function Companies() {
             onSuccess: (page) => {
                 toast.dismiss();
                 if (page.props.flash.success) {
-                    toast.success(t(page.props.flash.success));
+                    toast.success(t(page.props.flash.success as string));
                 } else if (page.props.flash.error) {
-                    toast.error(t(page.props.flash.error));
+                    toast.error(t(page.props.flash.error as string));
                 }
             },
             onError: (errors) => {
@@ -297,9 +345,9 @@ export default function Companies() {
                 setIsUpgradePlanModalOpen(false);
                 toast.dismiss();
                 if (page.props.flash.success) {
-                    toast.success(t(page.props.flash.success));
+                    toast.success(t(page.props.flash.success as string));
                 } else if (page.props.flash.error) {
-                    toast.error(t(page.props.flash.error));
+                    toast.error(t(page.props.flash.error as string));
                 }
                 router.reload();
             },
@@ -356,6 +404,26 @@ export default function Companies() {
                         <div className="font-medium">{row.name}</div>
                         <div className="text-sm text-muted-foreground">{row.email}</div>
                     </div>
+                </div>
+            )
+        },
+        {
+            key: 'subscription_type',
+            label: t('Subscription'),
+            render: (value: string, row: any) => (
+                <div className="flex flex-col gap-1">
+                    <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
+                        value === 'subscription'
+                            ? 'bg-purple-50 text-purple-700 ring-1 ring-inset ring-purple-600/20'
+                            : 'bg-gray-50 text-gray-600 ring-1 ring-inset ring-gray-500/20'
+                    }`}>
+                        {value === 'subscription' ? t('Subscription') : t('Free')}
+                    </span>
+                    {value === 'subscription' && row.subscription_duration && (
+                        <span className="text-xs text-muted-foreground">
+                            {row.subscription_duration === 'yearly' ? t('Yearly') : t('Monthly')}
+                        </span>
+                    )}
                 </div>
             )
         },
@@ -559,7 +627,6 @@ export default function Companies() {
                                                     src={company.avatar}
                                                     alt={company?.name || 'Avatar'}
                                                     onError={(e) => {
-                                                        // Fallback to default avatar on error
                                                         const target = e.target as HTMLImageElement;
                                                         target.src = getDisplayUrl('avatars/avatar.png');
                                                     }}
@@ -579,9 +646,9 @@ export default function Companies() {
                                         </div>
                                     </div>
 
-                                    {/* Plan Information */}
+                                    {/* Subscription & Plan Information */}
                                     <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 mb-6">
-                                        <div className="flex items-center justify-between">
+                                        <div className="flex items-center justify-between mb-2">
                                             <div className="flex items-center">
                                                 <CreditCard className="h-4 w-4 text-primary mr-2" />
                                                 <span className="text-sm font-medium text-gray-900 dark:text-white">
@@ -596,6 +663,21 @@ export default function Companies() {
                                             >
                                                 {t("Upgrade")}
                                             </Button>
+                                        </div>
+                                        {/* Subscription Type Badge */}
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${
+                                                company.subscription_type === 'subscription'
+                                                    ? 'bg-purple-50 text-purple-700 ring-1 ring-inset ring-purple-600/20'
+                                                    : 'bg-gray-50 text-gray-600 ring-1 ring-inset ring-gray-500/20'
+                                            }`}>
+                                                {company.subscription_type === 'subscription' ? t('Subscription') : t('Free')}
+                                            </span>
+                                            {company.subscription_type === 'subscription' && company.subscription_duration && (
+                                                <span className="text-xs text-muted-foreground">
+                                                    ({company.subscription_duration === 'yearly' ? t('Yearly') : t('Monthly')})
+                                                </span>
+                                            )}
                                         </div>
                                         {company.plan_expiry_date && (
                                             <div className="text-xs text-gray-500 dark:text-gray-400">
@@ -682,8 +764,6 @@ export default function Companies() {
                                         </DropdownMenu>
                                     </div>
                                 </div>
-
-                                {/* Hover Effect Overlay - REMOVED */}
                             </Card>
                         ))}
 
@@ -722,7 +802,7 @@ export default function Companies() {
                 </div>
             )}
 
-            {/* Form Modal */}
+            {/* Form Modal - Updated with subscription fields */}
             <CrudFormModal
                 isOpen={isFormModalOpen}
                 onClose={() => setIsFormModalOpen(false)}
@@ -736,6 +816,12 @@ export default function Companies() {
 
                     // Remove login_enabled field as it's not needed in the backend
                     delete data.login_enabled;
+
+                    // If subscription_type is 'free', remove subscription_duration
+                    if (data.subscription_type === 'free') {
+                        delete data.subscription_duration;
+                    }
+
                     handleFormSubmit(data);
                 }}
                 formConfig={{
@@ -743,9 +829,35 @@ export default function Companies() {
                         { name: 'name', label: t('Company Name'), type: 'text', required: true },
                         { name: 'email', label: t('Email'), type: 'email', required: true },
                         {
+                            name: 'subscription_type',
+                            label: t('Subscription Type'),
+                            type: 'select',
+                            required: true,
+                            defaultValue: 'free',
+                            options: [
+                                { value: 'free', label: t('Free') },
+                                { value: 'subscription', label: t('Subscription') }
+                            ],
+                            conditional: (mode) => mode !== 'view' && mode !== 'edit'
+                        },
+                        {
+                            name: 'subscription_duration',
+                            label: t('Subscription Duration'),
+                            type: 'select',
+                            required: true,
+                            defaultValue: 'monthly',
+                            options: [
+                                { value: 'monthly', label: t('Monthly') },
+                                { value: 'yearly', label: t('Yearly') }
+                            ],
+                            conditional: (mode, data) => {
+                                return mode !== 'view' && mode !== 'edit' && data?.subscription_type === 'subscription';
+                            }
+                        },
+                        {
                             name: 'login_enabled',
                             label: t('Enable Login'),
-                            placeholder: '', // Empty placeholder to prevent duplicate label
+                            placeholder: '',
                             type: 'switch',
                             defaultValue: true,
                             conditional: (mode) => mode !== 'view' && mode !== 'edit'
@@ -764,7 +876,9 @@ export default function Companies() {
                 }}
                 initialData={{
                     ...currentCompany,
-                    login_enabled: currentCompany?.status === 'active'
+                    login_enabled: currentCompany?.status === 'active',
+                    subscription_type: currentCompany?.subscription_type || 'free',
+                    subscription_duration: currentCompany?.subscription_duration || 'monthly',
                 }}
                 title={
                     formMode === 'create'
@@ -775,6 +889,75 @@ export default function Companies() {
                 }
                 mode={formMode}
             />
+
+            {/* License Key Modal */}
+            <Dialog open={isLicenseKeyModalOpen} onOpenChange={setIsLicenseKeyModalOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <KeyRound className="h-5 w-5 text-green-600" />
+                            {t('License Key Generated Successfully')}
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        {/* Success Icon & Message */}
+                        <div className="flex flex-col items-center text-center space-y-3">
+                            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
+                                <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                                {t('A license key has been generated for this pharmacy. Please copy it and send it to the customer.')}
+                            </p>
+                        </div>
+
+                        {/* License Key Display */}
+                        <div className="relative">
+                            <label className="text-sm font-medium text-foreground mb-2 block">
+                                {t('License Key')}
+                            </label>
+                            <div className="flex items-center gap-2">
+                                <div className="flex-1 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 font-mono text-sm break-all select-all">
+                                    {licenseKey}
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleCopyLicenseKey}
+                                    className="shrink-0 h-10 w-10 p-0"
+                                >
+                                    {licenseCopied ? (
+                                        <Check className="h-4 w-4 text-green-600" />
+                                    ) : (
+                                        <Copy className="h-4 w-4" />
+                                    )}
+                                </Button>
+                            </div>
+                        </div>
+
+                        {/* Warning */}
+                        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+                            <p className="text-xs text-amber-700 dark:text-amber-400">
+                                {t('Make sure to copy the license key now. You will not be able to see it again from this dialog.')}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="flex justify-end">
+                        <Button
+                            onClick={() => {
+                                setIsLicenseKeyModalOpen(false);
+                                setLicenseKey('');
+                                setLicenseCopied(false);
+                            }}
+                        >
+                            {t('Done')}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             {/* Delete Modal */}
             <CrudDeleteModal

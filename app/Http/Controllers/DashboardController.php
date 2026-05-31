@@ -201,7 +201,7 @@ class DashboardController extends Controller
                 'id' => $request->id,
                 'type' => 'plan',
                 'message' => 'Plan request ' . $request->status . ': ' . ($request->plan->name ?? 'Plan') . ' by ' . ($request->user->name ?? 'User'),
-                'time' => $request->created_at->diffForHumans(),
+                'time' => $request->created_at ,
                 'status' => $statusColor,
                 'created_at' => $request->created_at
             ];

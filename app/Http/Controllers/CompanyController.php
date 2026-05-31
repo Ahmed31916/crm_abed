@@ -8,6 +8,7 @@ use App\Models\PlanOrder;
 use App\Models\LeadStatus;
 use App\Models\OpportunityStage;
 use App\Models\TaskStatus;
+use App\Services\LicenseApiService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules\Password;
@@ -73,6 +74,9 @@ class CompanyController extends Controller
                 'created_at' => $company->created_at,
                 'plan_name' => $company->plan ? $company->plan->name : __('No Plan'),
                 'plan_expiry_date' => $company->plan_expire_date,
+                'subscription_type' => $company->subscription_type,
+                'subscription_duration' => $company->subscription_duration,
+                'license_key' => $company->license_key,
             ];
         });
 
@@ -93,6 +97,8 @@ class CompanyController extends Controller
             'email' => 'required|string|email|max:255|unique:users',
             'password' => 'nullable|string|min:8',
             'status' => 'required|in:active,inactive',
+            'subscription_type' => 'required|in:free,subscription',
+            'subscription_duration' => 'required_if:subscription_type,subscription|nullable|in:monthly,yearly',
         ]);
 
         $company = new User();
@@ -108,6 +114,12 @@ class CompanyController extends Controller
         $company->status = $validated['status'];
         $company->created_by = createdBy() ?? 1;
 
+        // Set subscription type and duration
+        $company->subscription_type = $validated['subscription_type'];
+        $company->subscription_duration = $validated['subscription_type'] === 'subscription'
+            ? $validated['subscription_duration']
+            : null;
+
         // Set company language same as creator (superadmin)
         $creator = auth()->user();
         if ($creator && $creator->lang) {
@@ -119,11 +131,17 @@ class CompanyController extends Controller
         if ($defaultPlan) {
             $company->plan_id = $defaultPlan->id;
 
-            // Set plan expiry date based on plan duration
-            if ($defaultPlan->duration === 'yearly') {
-                $company->plan_expire_date = now()->addYear();
+            // Set plan expiry date based on subscription duration or plan duration
+            if ($validated['subscription_type'] === 'subscription') {
+                $duration = $validated['subscription_duration'];
+                $company->plan_expire_date = $duration === 'yearly' ? now()->addYear() : now()->addMonth();
             } else {
-                $company->plan_expire_date = now()->addMonth();
+                // Free plan - use default plan duration
+                if ($defaultPlan->duration === 'yearly') {
+                    $company->plan_expire_date = now()->addYear();
+                } else {
+                    $company->plan_expire_date = now()->addMonth();
+                }
             }
 
             // Set plan is active
@@ -149,12 +167,60 @@ class CompanyController extends Controller
             event(new \App\Events\UserCreated($company, $validated['password'] ?? ''));
         }
 
+        // If subscription type is 'subscription', create a license via the external API
+        $licenseKey = null;
+        if ($validated['subscription_type'] === 'subscription') {
+            try {
+                $licenseService = new LicenseApiService();
+
+                // Calculate expiration date for the license
+                $duration = $validated['subscription_duration'];
+                $expirationDate = $duration === 'yearly'
+                    ? now()->addYear()->toIso8601String()
+                    : now()->addMonth()->toIso8601String();
+
+                $licenseResponse = $licenseService->createLicense(
+                    issuedTo: $validated['name'],
+                    licenseType: 'Subscription',
+                    expirationDate: $expirationDate
+                );
+
+                // Store the license key and ID on the company record
+                $company->license_key = $licenseResponse['licenseKey'] ?? null;
+                $company->license_id = $licenseResponse['licenseId'] ?? null;
+                $company->save();
+
+                $licenseKey = $licenseResponse['licenseKey'] ?? null;
+
+            } catch (\Exception $e) {
+                \Log::error('Failed to create license for company', [
+                    'company_id' => $company->id,
+                    'company_name' => $validated['name'],
+                    'error' => $e->getMessage(),
+                ]);
+
+                // Return with warning - company was created but license failed
+                if (session()->has('email_error')) {
+                    return redirect()->back()->with('warning', __('Company created successfully, but license creation failed: ') . $e->getMessage());
+                }
+
+                return redirect()->back()->with([
+                    'success' => __('Company created successfully, but license creation failed: ') . $e->getMessage(),
+                    'license_error' => true,
+                ]);
+            }
+        }
+
         // Check for email errors
         if (session()->has('email_error')) {
             return redirect()->back()->with('warning', __('Company created successfully, but welcome email failed: ') . session('email_error'));
         }
 
-        return redirect()->back()->with('success', __('Company created successfully'));
+        // Return success with the license key (if generated) so the frontend can show it
+        return redirect()->back()->with([
+            'success' => __('Company created successfully'),
+            'license_key' => $licenseKey,
+        ]);
     }
 
     public function update(Request $request, User $company)
@@ -167,16 +233,10 @@ class CompanyController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users,email,' . $company->id,
-            // 'status' => 'required|in:active,inactive',
         ]);
 
         $company->name = $validated['name'];
         $company->email = $validated['email'];
-        // $company->status = $validated['status'];
-        // // Only set password if provided
-        // if (isset($validated['password'])) {
-        //     $company->password = Hash::make($validated['password']);
-        // }
 
         $company->save();
 

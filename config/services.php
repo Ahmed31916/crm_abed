@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    'license_api' => [
+        'base_url' => env('LICENSE_API_BASE_URL'),
+        'username' => env('LICENSE_API_USERNAME'),
+        'password' => env('LICENSE_API_PASSWORD'),
+        'product_id' => env('LICENSE_API_PRODUCT_ID'),
+    ],
+
 ];
