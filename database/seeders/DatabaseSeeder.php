@@ -25,6 +25,7 @@ class DatabaseSeeder extends Seeder
 
                 EmailTemplateSeeder::class,
                 NotificationTemplateSeeder::class,
+                CountrySeeder::class,
 
                 LandingPageCustomPageSeeder::class,
                 CurrencySeeder::class,
@@ -85,6 +86,7 @@ class DatabaseSeeder extends Seeder
                 DocumentFolderSeeder::class,
                 DocumentTypeSeeder::class,
                 DocumentSeeder::class,
+                CountrySeeder::class,
 
                 // // Assign specific data to Sarah Johnson
                 SarahJohnsonDataSeeder::class,

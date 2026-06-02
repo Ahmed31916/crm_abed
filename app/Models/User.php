@@ -53,6 +53,12 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
         'invoice_template',
         'product_limit',
         'slug',
+        'company_name',
+        'phone',
+        'country_id',
+        'hardware_id',
+        'license_key',
+        'license_id',
     ];
 
     /**
@@ -152,10 +158,11 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
      */
     public function hasActivePlan()
     {
-        return $this->plan_id &&
-            $this->plan_is_active &&
+        return $this->plan_id && $this->license_key  
+            && $this->plan_is_active && 
             ($this->plan_expire_date === null || $this->plan_expire_date > now());
     }
+
 
     /**
      * Check if user's plan has expired
@@ -189,6 +196,11 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
         // Check if user has no plan and no default plan exists
         if (!$this->plan_id) {
             return !Plan::getDefaultPlan();
+        }
+
+        // Check if user has a plan but no license key (hasn't completed plan selection)
+        if ($this->plan_id && !$this->license_key) {
+            return true;
         }
 
         // Check if trial is expired

@@ -1,5 +1,5 @@
 import { useForm } from '@inertiajs/react';
-import { Mail, Lock, User } from 'lucide-react';
+import { Mail, Lock, User, Building2, Phone, Globe } from 'lucide-react';
 import { FormEventHandler, useState } from 'react';
 
 import InputError from '@/components/input-error';
@@ -15,6 +15,13 @@ import { THEME_COLORS } from '@/hooks/use-appearance';
 import { isDemoMode } from '@/utils/cookie-utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import { getTermsAndConditionsUrl } from '@/utils/helper';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 
 type RegisterForm = {
     name: string;
@@ -22,12 +29,28 @@ type RegisterForm = {
     password: string;
     password_confirmation: string;
     terms: boolean;
+    company_name: string;
+    phone: string;
+    country_id: string;
+    hardware_id: string;
     recaptcha_token?: string;
     plan_id?: string;
     referral_code?: string;
 };
 
-export default function Register({ referralCode, planId }: { referralCode?: string; planId?: string }) {
+interface Country {
+    id: number;
+    name: string;
+    code?: string;
+    phone_code?: string;
+}
+
+export default function Register({ referralCode, planId, countries, hardwareId }: { 
+    referralCode?: string; 
+    planId?: string; 
+    countries: Country[];
+    hardwareId?: string;
+}) {
     const { t } = useTranslation();
     const [recaptchaToken, setRecaptchaToken] = useState<string>('');
     const { themeColor, customColor } = useBrand();
@@ -38,6 +61,10 @@ export default function Register({ referralCode, planId }: { referralCode?: stri
         password: '',
         password_confirmation: '',
         terms: false,
+        company_name: '',
+        phone: '',
+        country_id: '',
+        hardware_id: hardwareId || '',
         plan_id: planId,
         referral_code: referralCode,
     });
@@ -57,6 +84,7 @@ export default function Register({ referralCode, planId }: { referralCode?: stri
         >
             <form className="space-y-5" onSubmit={submit}>
                 <div className="space-y-4">
+                    {/* Full Name */}
                     <div className="relative">
                         <Label htmlFor="name" className="text-gray-700 dark:text-gray-300 font-medium mb-2 block" required>{t("Full name")}</Label>
                         <div className="relative">
@@ -77,6 +105,70 @@ export default function Register({ referralCode, planId }: { referralCode?: stri
                         <InputError message={errors.name} />
                     </div>
 
+                    {/* Company Name */}
+                    <div className="relative">
+                        <Label htmlFor="company_name" className="text-gray-700 dark:text-gray-300 font-medium mb-2 block" required>{t("Company name")}</Label>
+                        <div className="relative">
+                            <Input
+                                id="company_name"
+                                type="text"
+                                required
+                                tabIndex={2}
+                                value={data.company_name}
+                                onChange={(e) => setData('company_name', e.target.value)}
+                                placeholder={t("Enter your company name")}
+                                className="w-full border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg transition-all duration-200"
+                                style={{ '--tw-ring-color': primaryColor } as React.CSSProperties}
+                            />
+                        </div>
+                        <InputError message={errors.company_name} />
+                    </div>
+
+                    {/* Phone */}
+                    <div className="relative">
+                        <Label htmlFor="phone" className="text-gray-700 dark:text-gray-300 font-medium mb-2 block" required>{t("Phone number")}</Label>
+                        <div className="relative">
+                            <Input
+                                id="phone"
+                                type="tel"
+                                required
+                                tabIndex={3}
+                                autoComplete="tel"
+                                value={data.phone}
+                                onChange={(e) => setData('phone', e.target.value)}
+                                placeholder={t("Enter your phone number")}
+                                className="w-full border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg transition-all duration-200"
+                                style={{ '--tw-ring-color': primaryColor } as React.CSSProperties}
+                            />
+                        </div>
+                        <InputError message={errors.phone} />
+                    </div>
+
+                    {/* Country Select */}
+                    <div className="relative">
+                        <Label htmlFor="country_id" className="text-gray-700 dark:text-gray-300 font-medium mb-2 block" required>{t("Country")}</Label>
+                        <Select
+                            value={data.country_id}
+                            onValueChange={(value) => setData('country_id', value)}
+                        >
+                            <SelectTrigger
+                                className="w-full border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg transition-all duration-200"
+                                style={{ '--tw-ring-color': primaryColor } as React.CSSProperties}
+                            >
+                                <SelectValue placeholder={t("Select your country")} />
+                            </SelectTrigger>
+                            <SelectContent className="max-h-60">
+                                {countries && countries.map((country) => (
+                                    <SelectItem key={country.id} value={String(country.id)}>
+                                        {country.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <InputError message={errors.country_id} />
+                    </div>
+
+                    {/* Email */}
                     <div className="relative">
                         <Label htmlFor="email" className="text-gray-700 dark:text-gray-300 font-medium mb-2 block" required>{t("Email address")}</Label>
                         <div className="relative">
@@ -84,7 +176,7 @@ export default function Register({ referralCode, planId }: { referralCode?: stri
                                 id="email"
                                 type="email"
                                 required
-                                tabIndex={2}
+                                tabIndex={5}
                                 autoComplete="email"
                                 value={data.email}
                                 onChange={(e) => setData('email', e.target.value)}
@@ -96,6 +188,7 @@ export default function Register({ referralCode, planId }: { referralCode?: stri
                         <InputError message={errors.email} />
                     </div>
 
+                    {/* Password */}
                     <div>
                         <Label htmlFor="password" className="text-gray-700 dark:text-gray-300 font-medium mb-2 block" required>{t("Password")}</Label>
                         <div className="relative">
@@ -103,7 +196,7 @@ export default function Register({ referralCode, planId }: { referralCode?: stri
                                 id="password"
                                 type="password"
                                 required
-                                tabIndex={3}
+                                tabIndex={6}
                                 autoComplete="new-password"
                                 value={data.password}
                                 onChange={(e) => setData('password', e.target.value)}
@@ -115,6 +208,7 @@ export default function Register({ referralCode, planId }: { referralCode?: stri
                         <InputError message={errors.password} />
                     </div>
 
+                    {/* Confirm Password */}
                     <div>
                         <Label htmlFor="password_confirmation" className="text-gray-700 dark:text-gray-300 font-medium mb-2 block" required>{t("Confirm password")}</Label>
                         <div className="relative">
@@ -122,7 +216,7 @@ export default function Register({ referralCode, planId }: { referralCode?: stri
                                 id="password_confirmation"
                                 type="password"
                                 required
-                                tabIndex={4}
+                                tabIndex={7}
                                 autoComplete="new-password"
                                 value={data.password_confirmation}
                                 onChange={(e) => setData('password_confirmation', e.target.value)}
@@ -134,12 +228,18 @@ export default function Register({ referralCode, planId }: { referralCode?: stri
                         <InputError message={errors.password_confirmation} />
                     </div>
 
+                    {/* Hidden Hardware ID */}
+                    {data.hardware_id && (
+                        <input type="hidden" value={data.hardware_id} />
+                    )}
+
+                    {/* Terms */}
                     <div className="flex items-center !mt-4 !mb-5">
                         <Checkbox
                             id="terms"
                             checked={data.terms}
                             onClick={() => setData('terms', !data.terms)}
-                            tabIndex={5}
+                            tabIndex={8}
                             className="w-[14px] h-[14px] border border-gray-300 rounded"
                         />
                         <Label htmlFor="terms" className="ml-2 text-gray-600 dark:text-gray-400 text-sm" required>{t("I agree to the")}{' '}
@@ -163,7 +263,7 @@ export default function Register({ referralCode, planId }: { referralCode?: stri
                 />
 
                 <AuthButton
-                    tabIndex={6}
+                    tabIndex={9}
                     processing={processing}
                     className="w-full text-white py-2.5 text-sm font-medium tracking-wide transition-all duration-200 rounded-md shadow-md hover:shadow-lg transform hover:scale-[1.02]"
                     style={{ backgroundColor: primaryColor }}
@@ -177,7 +277,7 @@ export default function Register({ referralCode, planId }: { referralCode?: stri
                             href={route('login')}
                             className="font-medium hover:underline"
                             style={{ color: primaryColor }}
-                            tabIndex={7}
+                            tabIndex={10}
                         >
                             {t("Sign in")}
                         </TextLink>

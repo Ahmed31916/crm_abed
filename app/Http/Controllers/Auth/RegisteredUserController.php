@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Plan;
+use App\Models\Country;
 use App\Models\Referral;
 use App\Models\ReferralSetting;
 use App\Models\LeadStatus;
@@ -34,6 +35,7 @@ class RegisteredUserController extends Controller
 
         $referralCode = $request->get('ref');
         $encryptedPlanId = $request->get('plan');
+        $hardwareId = $request->get('hardware_id');
         $planId = null;
         $referrer = null;
 
@@ -51,10 +53,15 @@ class RegisteredUserController extends Controller
                 ->first();
         }
 
+        // Get all active countries for the select dropdown
+        $countries = Country::orderBy('name')->get(['id', 'name', 'code', 'phone_code']);
+
         return Inertia::render('auth/register', [
             'referralCode' => $referralCode,
             'planId' => $planId,
             'referrer' => $referrer ? $referrer->name : null,
+            'countries' => $countries,
+            'hardwareId' => $hardwareId,
         ]);
     }
 
@@ -71,6 +78,10 @@ class RegisteredUserController extends Controller
 
         $request->validate([
             'name' => 'required|string|max:255',
+            'company_name' => 'required|string|max:255',
+            'phone' => 'required|string|max:20',
+            'country_id' => 'required|integer|exists:countries,id',
+            'hardware_id' => 'nullable|string|max:255',
             'email' => 'required|string|lowercase|email|max:255|unique:'.User::class,
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
             'terms' => 'required|accepted',
@@ -85,6 +96,10 @@ class RegisteredUserController extends Controller
             'is_enable_login' => 1,
             'created_by' => 1,
             'plan_is_active' => 0,
+            'company_name' => $request->company_name,
+            'phone' => $request->phone,
+            'country_id' => $request->country_id,
+            'hardware_id' => $request->hardware_id,
         ];
 
         // Handle referral code
@@ -124,12 +139,8 @@ class RegisteredUserController extends Controller
             return redirect()->route('verification.notice');
         }
 
-        // Redirect to plans page with selected plan
-        $planId = $request->plan_id;
-        if ($planId) {
-            return redirect()->route('plans.index', ['selected' => $planId]);
-        }
-        return to_route('dashboard');
+        // Always redirect to plans page for new users to select a plan
+        return redirect()->route('plans.index');
     }
 
     /**

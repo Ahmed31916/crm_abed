@@ -212,6 +212,11 @@ Route::post('/change-language', [TranslationController::class, 'changeLanguage']
 Route::get('/page/{slug}', [CustomPageController::class, 'show'])->name('custom-page.show');
 
 Route::middleware(['auth', 'verified'])->group(function () {
+    Route::post('license/generate', [App\Http\Controllers\LicenseKeyController::class, 'generate'])->name('license.generate');
+    Route::post('license/validate', [App\Http\Controllers\LicenseKeyController::class, 'validate'])->name('license.validate');
+    Route::post('license/activate', [App\Http\Controllers\LicenseKeyController::class, 'activate'])->name('license.activate');
+    Route::post('license/trial-request', [App\Http\Controllers\LicenseKeyController::class, 'submitTrialRequest'])->name('license.trial-request');
+
     // Plans routes - accessible without plan check
     Route::get('plans', [PlanController::class, 'index'])->name('plans.index');
     Route::post('plans/request', [PlanController::class, 'requestPlan'])->name('plans.request');
