@@ -31,7 +31,8 @@ import {
     IndianRupee,
     Wallet,
     Coins,
-    Edit
+    Edit,
+    Settings2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -39,6 +40,11 @@ import { CrudDeleteModal } from '@/components/CrudDeleteModal';
 import { useForm } from '@inertiajs/react';
 import { toast } from '@/components/custom-toast';
 import { PlanSubscriptionModal } from '@/components/plan-subscription-modal';
+
+interface Feature {
+    feature_name: string;
+    feature_value: string;
+}
 
 interface Plan {
     id: number;
@@ -48,15 +54,8 @@ interface Plan {
     duration: string;
     description: string;
     trial_days: number;
-    features: string[];
-    stats: {
-        users: number | string;
-        projects: number | string;
-        contacts: number | string;
-        accounts: number | string;
-        storage: string;
-    };
-    status: boolean;
+    features: Feature[];
+    status: string; // 'on' or 'off'
     recommended?: boolean;
     is_default?: boolean;
     is_current?: boolean;
@@ -90,11 +89,9 @@ export default function Plans({ plans: initialPlans, billingCycle: initialBillin
     // Helper function to safely format currency
     const formatCurrency = (amount: string | number) => {
         if (typeof window !== 'undefined' && window.appSettings?.formatCurrency) {
-            // Use numeric value if available, otherwise parse the string
             const numericAmount = typeof amount === 'number' ? amount : parseFloat(amount);
             return window.appSettings.formatCurrency(numericAmount, { showSymbol: true });
         }
-        // Fallback if appSettings is not available
         return amount;
     };
 
@@ -566,48 +563,14 @@ export default function Plans({ plans: initialPlans, billingCycle: initialBillin
         );
     };
 
-    // Function to get the appropriate icon for a feature
-    const getFeatureIcon = (feature: string) => {
-        switch (feature) {
-            case 'Custom Domain':
-                return <Globe className="h-4 w-4" />;
-            case 'Subdomain':
-                return <Globe className="h-4 w-4" />;
-            case 'PWA':
-                return <FileText className="h-4 w-4" />;
-            case 'Blog Module':
-                return <FileText className="h-4 w-4" />;
-            case 'AI Integration':
-                return <Bot className="h-4 w-4" />;
-            case 'Analytics':
-                return <BarChart2 className="h-4 w-4" />;
-            case 'Email Support':
-                return <Mail className="h-4 w-4" />;
-            case 'API Access':
-                return <Box className="h-4 w-4" />;
-            case 'Priority Support':
-                return <Users className="h-4 w-4" />;
-            case 'Storage':
-                return <HardDrive className="h-4 w-4" />;
-            default:
-                return <CheckCircle2 className="h-4 w-4" />;
-        }
-    };
-
-    // Function to check if a feature is included in the plan
-    const isFeatureIncluded = (plan: Plan, feature: string) => {
-        return plan.features.includes(feature);
-    };
-
     // Function to toggle plan status
     const togglePlanStatus = (planId: number) => {
-        // Send request to toggle plan status
-        router.post(route('plans.toggle-status', planId), {}, {
+        router.put(route('plans.toggle-status', planId), {}, {
             preserveState: true,
             onSuccess: (page) => {
-                // Update local state
+                // Update local state - toggle between 'on' and 'off'
                 setPlans(plans.map(plan =>
-                    plan.id === planId ? { ...plan, status: !plan.status } : plan
+                    plan.id === planId ? { ...plan, status: plan.status === 'on' ? 'off' : 'on' } : plan
                 ));
                 toast.dismiss();
                 if (page.props.flash.success) {
@@ -641,20 +604,6 @@ export default function Plans({ plans: initialPlans, billingCycle: initialBillin
                 }
             });
         }
-    };
-
-    // Common features to display for all plans
-    const commonFeatures = [
-        'AI Integration'
-    ];
-
-    // Define stat icons
-    const statIcons = {
-        users: <Users className="h-4 w-4 text-blue-500" />,
-        projects: <Box className="h-4 w-4 text-green-500" />,
-        contacts: <Mail className="h-4 w-4 text-orange-500" />,
-        accounts: <Store className="h-4 w-4 text-purple-500" />,
-        storage: <HardDrive className="h-4 w-4 text-yellow-500" />
     };
 
     const breadcrumbs = [
@@ -736,7 +685,9 @@ export default function Plans({ plans: initialPlans, billingCycle: initialBillin
                 relative h-full flex flex-col rounded-lg border-2 transition-all duration-200
                 ${plan.recommended
                                     ? 'border-primary shadow-xl bg-white'
-                                    : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-lg'
+                                    : plan.status !== 'on'
+                                        ? 'border-gray-300 bg-gray-50 opacity-75'
+                                        : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-lg'
                                 }
               `}>
                                 {/* Recommended Badge */}
@@ -757,11 +708,11 @@ export default function Plans({ plans: initialPlans, billingCycle: initialBillin
                                                     {t("Default")}
                                                 </span>
                                             )}
-                                            <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${plan.status
+                                            <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${plan.status === 'on'
                                                     ? 'bg-green-50 text-green-700 ring-green-600/20'
                                                     : 'bg-red-50 text-red-700 ring-red-600/20'
                                                 }`}>
-                                                {plan.status ? t("Active") : t("Inactive")}
+                                                {plan.status === 'on' ? t("Active") : t("Inactive")}
                                             </span>
                                         </>
                                     )}
@@ -781,16 +732,13 @@ export default function Plans({ plans: initialPlans, billingCycle: initialBillin
                                     <div className="mb-4">
                                         <div className="flex items-center justify-center">
                                             <span className="text-4xl font-bold text-gray-900">
-                                                {currencySymbol}{plan.price}
+                                                {currencySymbol}{plan.formatted_price || plan.price}
                                             </span>
                                             <span className="text-gray-500 ml-1">
                                                 /{t(plan.duration.toLowerCase())}
                                             </span>
                                         </div>
                                     </div>
-                                    <p className="text-gray-600 text-sm mb-4">
-                                        {plan.description}
-                                    </p>
                                     {plan.trial_days > 0 && (
                                         <div className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
                                             <Zap className="h-3 w-3" />
@@ -801,71 +749,30 @@ export default function Plans({ plans: initialPlans, billingCycle: initialBillin
 
                                 {/* Card Content */}
                                 <div className="flex flex-col flex-1 p-6">
-                                    {/* Usage Stats */}
-                                    <div className="mb-6">
-                                        <h4 className="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">
-                                            {t("What's Included")}
-                                        </h4>
-                                        <div className="space-y-3">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    {statIcons.users}
-                                                    <span className="text-sm text-gray-700">{t("Users")}</span>
-                                                </div>
-                                                <span className="text-sm font-semibold text-gray-900">{plan.stats.users}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    {statIcons.projects}
-                                                    <span className="text-sm text-gray-700">{t("Projects")}</span>
-                                                </div>
-                                                <span className="text-sm font-semibold text-gray-900">{plan.stats.projects}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    {statIcons.contacts}
-                                                    <span className="text-sm text-gray-700">{t("Contacts")}</span>
-                                                </div>
-                                                <span className="text-sm font-semibold text-gray-900">{plan.stats.contacts}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    {statIcons.accounts}
-                                                    <span className="text-sm text-gray-700">{t("Accounts")}</span>
-                                                </div>
-                                                <span className="text-sm font-semibold text-gray-900">{plan.stats.accounts}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    {statIcons.storage}
-                                                    <span className="text-sm text-gray-700">{t("Storage")}</span>
-                                                </div>
-                                                <span className="text-sm font-semibold text-gray-900">{plan.stats.storage}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Features */}
+                                    {/* Dynamic Features from plan_features table */}
                                     <div className="mb-6 flex-1">
-                                        <h4 className="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">
+                                        <h4 className="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide flex items-center gap-2">
+                                            <Settings2 className="h-4 w-4 text-primary" />
                                             {t("Features")}
                                         </h4>
-                                        <ul className="space-y-2">
-                                            {commonFeatures.map((feature, index) => {
-                                                const included = isFeatureIncluded(plan, feature);
-                                                return (
-                                                    <li key={index} className="flex items-center gap-2">
-                                                        <div className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${included ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'
-                                                            }`}>
-                                                            {included ? <CheckCircle2 className="h-3 w-3" /> : <X className="h-3 w-3" />}
-                                                        </div>
-                                                        <span className={`text-sm ${included ? 'text-gray-700' : 'text-gray-400'}`}>
-                                                            {t(feature)}
+                                        {plan.features && plan.features.length > 0 ? (
+                                            <div className="space-y-3">
+                                                {plan.features.map((feature, index) => (
+                                                    <div key={index} className="flex items-center justify-between">
+                                                        <span className="text-sm text-gray-700">
+                                                            {feature.feature_name}
                                                         </span>
-                                                    </li>
-                                                );
-                                            })}
-                                        </ul>
+                                                        <span className="text-sm font-semibold text-gray-900">
+                                                            {feature.feature_value}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <p className="text-sm text-gray-400 text-center py-4">
+                                                {t('No features configured for this plan')}
+                                            </p>
+                                        )}
                                     </div>
 
                                     {/* Actions */}
@@ -874,12 +781,12 @@ export default function Plans({ plans: initialPlans, billingCycle: initialBillin
                                             <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                                                 <div className="flex items-center gap-2">
                                                     <Switch
-                                                        checked={plan.status}
+                                                        checked={plan.status === 'on'}
                                                         onCheckedChange={() => togglePlanStatus(plan.id)}
-                                                        className={plan.status ? "data-[state=checked]:bg-primary" : ""}
+                                                        className={plan.status === 'on' ? "data-[state=checked]:bg-primary" : ""}
                                                     />
                                                     <span className="text-sm text-gray-700">
-                                                        {plan.status ? t("Active") : t("Inactive")}
+                                                        {plan.status === 'on' ? t("Active") : t("Inactive")}
                                                     </span>
                                                 </div>
                                                 <div className="flex items-center gap-1">
@@ -926,6 +833,33 @@ export default function Plans({ plans: initialPlans, billingCycle: initialBillin
                         </div>
                     ))}
                 </div>
+
+                {/* No Plans */}
+                {plans.length === 0 && (
+                    <div className="text-center py-12">
+                        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4">
+                            <Settings2 className="h-8 w-8 text-gray-400" />
+                        </div>
+                        <h3 className="text-lg font-medium text-gray-900 mb-2">
+                            {t('No Plans Available')}
+                        </h3>
+                        <p className="text-gray-500 mb-6">
+                            {isAdmin
+                                ? t("Get started by creating your first subscription plan.")
+                                : t('There are currently no plans available. Please contact the administrator.')
+                            }
+                        </p>
+                        {isAdmin && (
+                            <Button
+                                className="bg-primary hover:bg-primary/90 text-white"
+                                onClick={() => router.get(route('plans.create'))}
+                            >
+                                <Plus className="h-4 w-4 mr-2" />
+                                {t("Add Plan")}
+                            </Button>
+                        )}
+                    </div>
+                )}
 
                 {/* Delete Modal - Admin only */}
                 {isAdmin && (

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -7,14 +7,6 @@ import { router, usePage, useForm } from '@inertiajs/react';
 import {
     CheckCircle2,
     X,
-    Globe,
-    FileText,
-    Bot,
-    BarChart2,
-    Mail,
-    Box,
-    Store,
-    Users,
     HardDrive,
     Sparkles,
     Crown,
@@ -23,9 +15,15 @@ import {
     Loader2,
     ArrowRight,
     Shield,
+    Settings2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/components/custom-toast';
+
+interface Feature {
+    feature_name: string;
+    feature_value: string;
+}
 
 interface Plan {
     id: number;
@@ -35,14 +33,7 @@ interface Plan {
     duration: string;
     description: string;
     trial_days: number;
-    features: string[];
-    stats: {
-        users: number | string;
-        projects: number | string;
-        contacts: number | string;
-        accounts: number | string;
-        storage: string;
-    };
+    features: Feature[];
     status: boolean;
     recommended?: boolean;
     is_default?: boolean;
@@ -77,41 +68,30 @@ export default function SelectPlan({
 
     const { processing } = useForm();
 
-    // Update plans when initialPlans changes
     useEffect(() => {
         setPlans(initialPlans);
     }, [initialPlans]);
 
-    // Show flash messages
     useEffect(() => {
-        if (flash?.error) {
-            toast.error(flash.error);
-        }
-        if (flash?.success) {
-            toast.success(flash.success);
-        }
-        if (flash?.warning) {
-            toast.warning(flash.warning);
-        }
+        if (flash?.error) toast.error(flash.error);
+        if (flash?.success) toast.success(flash.success);
+        if (flash?.warning) toast.warning(flash.warning);
     }, [flash]);
 
-    // Function to handle billing cycle change
     const handleBillingCycleChange = (value: 'monthly' | 'yearly') => {
         setBillingCycle(value);
         router.get(route('plans.index'), { billing_cycle: value }, { preserveState: true });
     };
 
-    // Handle plan selection - subscribe and generate license key
     const handleSubscribeAndGenerate = (planId: number) => {
         if (processing) return;
-
         setSelectedPlanId(planId);
 
         router.post(route('license.generate'), {
             plan_id: planId,
             billing_cycle: billingCycle,
         }, {
-            onSuccess: (page) => {
+            onSuccess: () => {
                 setSelectedPlanId(null);
             },
             onError: (errors) => {
@@ -123,53 +103,6 @@ export default function SelectPlan({
                 }
             }
         });
-    };
-
-    // Function to get the appropriate icon for a feature
-    const getFeatureIcon = (feature: string) => {
-        switch (feature) {
-            case 'Custom Domain':
-                return <Globe className="h-4 w-4" />;
-            case 'Subdomain':
-                return <Globe className="h-4 w-4" />;
-            case 'PWA':
-                return <FileText className="h-4 w-4" />;
-            case 'Blog Module':
-                return <FileText className="h-4 w-4" />;
-            case 'AI Integration':
-                return <Bot className="h-4 w-4" />;
-            case 'Analytics':
-                return <BarChart2 className="h-4 w-4" />;
-            case 'Email Support':
-                return <Mail className="h-4 w-4" />;
-            case 'API Access':
-                return <Box className="h-4 w-4" />;
-            case 'Priority Support':
-                return <Users className="h-4 w-4" />;
-            case 'Storage':
-                return <HardDrive className="h-4 w-4" />;
-            default:
-                return <CheckCircle2 className="h-4 w-4" />;
-        }
-    };
-
-    // Function to check if a feature is included in the plan
-    const isFeatureIncluded = (plan: Plan, feature: string) => {
-        return plan.features.includes(feature);
-    };
-
-    // Common features to display for all plans
-    const commonFeatures = [
-        'AI Integration'
-    ];
-
-    // Define stat icons
-    const statIcons = {
-        users: <Users className="h-4 w-4 text-blue-500" />,
-        projects: <Box className="h-4 w-4 text-green-500" />,
-        contacts: <Mail className="h-4 w-4 text-orange-500" />,
-        accounts: <Store className="h-4 w-4 text-purple-500" />,
-        storage: <HardDrive className="h-4 w-4 text-yellow-500" />
     };
 
     return (
@@ -224,7 +157,6 @@ export default function SelectPlan({
                             key={plan.id}
                             className={`relative h-full transition-all duration-200 ${plan.recommended ? 'transform scale-105' : ''}`}
                         >
-                            {/* Main Card */}
                             <div className={`
                                 relative h-full flex flex-col rounded-lg border-2 transition-all duration-200
                                 ${plan.recommended
@@ -241,15 +173,15 @@ export default function SelectPlan({
                                     </div>
                                 )}
 
-                                {/* Status Indicators */}
-                                <div className="absolute top-4 right-4 z-10 flex flex-col gap-1">
-                                    {plan.is_current && (
+                                {/* Current Badge */}
+                                {plan.is_current && (
+                                    <div className="absolute top-4 right-4 z-10">
                                         <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
                                             <Crown className="h-3 w-3 mr-1" />
                                             {t("Current")}
                                         </span>
-                                    )}
-                                </div>
+                                    </div>
+                                )}
 
                                 {/* Card Header */}
                                 <div className={`p-6 text-center border-b border-gray-100 dark:border-gray-700 ${plan.recommended ? 'pt-10' : ''}`}>
@@ -279,74 +211,36 @@ export default function SelectPlan({
 
                                 {/* Card Content */}
                                 <div className="flex flex-col flex-1 p-6">
-                                    {/* Usage Stats */}
-                                    <div className="mb-6">
-                                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3 uppercase tracking-wide">
-                                            {t("What's Included")}
-                                        </h4>
-                                        <div className="space-y-3">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    {statIcons.users}
-                                                    <span className="text-sm text-gray-700 dark:text-gray-300">{t("Users")}</span>
-                                                </div>
-                                                <span className="text-sm font-semibold text-gray-900 dark:text-white">{plan.stats.users}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    {statIcons.projects}
-                                                    <span className="text-sm text-gray-700 dark:text-gray-300">{t("Projects")}</span>
-                                                </div>
-                                                <span className="text-sm font-semibold text-gray-900 dark:text-white">{plan.stats.projects}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    {statIcons.contacts}
-                                                    <span className="text-sm text-gray-700 dark:text-gray-300">{t("Contacts")}</span>
-                                                </div>
-                                                <span className="text-sm font-semibold text-gray-900 dark:text-white">{plan.stats.contacts}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    {statIcons.accounts}
-                                                    <span className="text-sm text-gray-700 dark:text-gray-300">{t("Accounts")}</span>
-                                                </div>
-                                                <span className="text-sm font-semibold text-gray-900 dark:text-white">{plan.stats.accounts}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    {statIcons.storage}
-                                                    <span className="text-sm text-gray-700 dark:text-gray-300">{t("Storage")}</span>
-                                                </div>
-                                                <span className="text-sm font-semibold text-gray-900 dark:text-white">{plan.stats.storage}</span>
+                                    {/* Dynamic Features */}
+                                    {plan.features && plan.features.length > 0 && (
+                                        <div className="mb-6">
+                                            <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3 uppercase tracking-wide flex items-center gap-2">
+                                                <Settings2 className="h-4 w-4 text-primary" />
+                                                {t("Features")}
+                                            </h4>
+                                            <div className="space-y-3">
+                                                {plan.features.map((feature, index) => (
+                                                    <div key={index} className="flex items-center justify-between">
+                                                        <span className="text-sm text-gray-700 dark:text-gray-300">
+                                                            {feature.feature_name}
+                                                        </span>
+                                                        <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                                                            {feature.feature_value}
+                                                        </span>
+                                                    </div>
+                                                ))}
                                             </div>
                                         </div>
-                                    </div>
+                                    )}
 
-                                    {/* Features */}
-                                    <div className="mb-6 flex-1">
-                                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3 uppercase tracking-wide">
-                                            {t("Features")}
-                                        </h4>
-                                        <ul className="space-y-2">
-                                            {commonFeatures.map((feature, index) => {
-                                                const included = isFeatureIncluded(plan, feature);
-                                                return (
-                                                    <li key={index} className="flex items-center gap-2">
-                                                        <div className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${included ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'
-                                                            }`}>
-                                                            {included ? <CheckCircle2 className="h-3 w-3" /> : <X className="h-3 w-3" />}
-                                                        </div>
-                                                        <span className={`text-sm ${included ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400'}`}>
-                                                            {t(feature)}
-                                                        </span>
-                                                    </li>
-                                                );
-                                            })}
-                                        </ul>
-                                    </div>
+                                    {/* Fallback if no features */}
+                                    {(!plan.features || plan.features.length === 0) && (
+                                        <div className="mb-6 text-center py-4">
+                                            <p className="text-sm text-gray-400">{t('No features configured for this plan')}</p>
+                                        </div>
+                                    )}
 
-                                    {/* Action Button - Subscribe & Generate License Key */}
+                                    {/* Action Button */}
                                     <div className="mt-auto">
                                         {plan.is_current ? (
                                             <Button disabled className="w-full bg-green-100 text-green-800 border-green-200">
@@ -383,11 +277,11 @@ export default function SelectPlan({
                     ))}
                 </div>
 
-                {/* No Plans Available Message */}
+                {/* No Plans */}
                 {plans.length === 0 && (
                     <div className="text-center py-12">
                         <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-700 mb-4">
-                            <BarChart2 className="h-8 w-8 text-gray-400" />
+                            <Settings2 className="h-8 w-8 text-gray-400" />
                         </div>
                         <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
                             {t('No Plans Available')}

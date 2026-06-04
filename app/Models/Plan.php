@@ -84,4 +84,9 @@ class Plan extends Model
     {
         return $this->hasMany(PlanOrder::class);
     }
+
+    public function features()
+    {
+        return $this->hasMany(PlanFeature::class);
+    }
 }
