@@ -37,9 +37,10 @@ return [
 
     'vital' => [
         'api_url' => env('VITAL_API_URL', ''),
-        'api_email' => env('VITAL_API_EMAIL', ''),
+        'api_username' => env('VITAL_API_USERNAME', env('VITAL_API_EMAIL', '')),
         'api_password' => env('VITAL_API_PASSWORD', ''),
         'product_id' => env('VITAL_API_PRODUCT_ID', ''),
+        'remote_key' => env('VITAL_API_REMOTE_KEY', 'pm_super_secret_api_key'),
     ],
 
 ];
