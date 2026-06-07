@@ -18,6 +18,7 @@ class LicenseKeyService
     protected int $loginTimeout = 45;
     protected int $apiTimeout = 45;
     protected int $loginRetries = 3;
+    protected bool $verifySsl;
 
     public function __construct()
     {
@@ -26,6 +27,7 @@ class LicenseKeyService
         $this->apiPassword = env('VITAL_API_PASSWORD', '');
         $this->productId = env('VITAL_API_PRODUCT_ID', '');
         $this->remoteApiKey = env('VITAL_API_REMOTE_KEY', 'pm_super_secret_api_key');
+        $this->verifySsl = env('VITAL_API_VERIFY_SSL', true);
 
         Log::info('LicenseKeyService initialized', [
             'api_url' => $this->apiUrl,
@@ -33,13 +35,26 @@ class LicenseKeyService
             'password_set' => !empty($this->apiPassword),
             'product_id_set' => !empty($this->productId),
             'remote_key' => $this->remoteApiKey,
+            'verify_ssl' => $this->verifySsl,
         ]);
     }
 
     /**
-     * Headers for PUBLIC endpoints (activate, validate, trial-requests).
-     * These only need RemoteManagementApiKey - no Bearer token.
+     * Apply SSL verification settings to an HTTP request.
+     * When VITAL_API_VERIFY_SSL=false in .env, disables SSL verification
+     * to work around missing CA certificates on the server.
+     *
+     * WARNING: Only set VITAL_API_VERIFY_SSL=false on production if you
+     * cannot install CA certificates. It is better to fix the server.
      */
+    protected function applySslSettings($request)
+    {
+        if (!$this->verifySsl) {
+            return $request->withOptions(['verify' => false]);
+        }
+        return $request;
+    }
+
     protected function getPublicHeaders(): array
     {
         return [
@@ -140,10 +155,13 @@ class LicenseKeyService
                     'header_keys' => array_keys($strategy['headers']),
                 ]);
 
-                $response = Http::withHeaders($strategy['headers'])
+                $request = Http::withHeaders($strategy['headers'])
                     ->timeout($this->loginTimeout)
-                    ->connectTimeout(10)
-                    ->post($loginUrl, $strategy['payload']);
+                    ->connectTimeout(10);
+
+                $request = $this->applySslSettings($request);
+
+                $response = $request->post($loginUrl, $strategy['payload']);
 
                 Log::info('Vital API login response', [
                     'strategy' => $strategy['name'],
@@ -307,10 +325,11 @@ class LicenseKeyService
             ]);
 
             try {
-                $response = Http::withHeaders($headers)
+                $request1 = Http::withHeaders($headers)
                     ->timeout($this->apiTimeout)
-                    ->connectTimeout(10)
-                    ->post($this->apiUrl . '/api/licenses/create', $payload);
+                    ->connectTimeout(10);
+                $request1 = $this->applySslSettings($request1);
+                $response = $request1->post($this->apiUrl . '/api/licenses/create', $payload);
             } catch (\Illuminate\Http\Client\ConnectionException $e) {
                 Log::error('Vital API: Connection error on license creation (Attempt 1)', [
                     'error' => $e->getMessage(),
@@ -347,10 +366,11 @@ class LicenseKeyService
                 ]);
 
                 try {
-                    $response2 = Http::withHeaders($headers2)
+                    $request2 = Http::withHeaders($headers2)
                         ->timeout($this->apiTimeout)
-                        ->connectTimeout(10)
-                        ->post($this->apiUrl . '/api/licenses/create', $payload);
+                        ->connectTimeout(10);
+                    $request2 = $this->applySslSettings($request2);
+                    $response2 = $request2->post($this->apiUrl . '/api/licenses/create', $payload);
                 } catch (\Illuminate\Http\Client\ConnectionException $e) {
                     Log::error('Vital API: Connection error on license creation (Attempt 2)', [
                         'error' => $e->getMessage(),
@@ -384,10 +404,11 @@ class LicenseKeyService
                     ]);
 
                     try {
-                        $response3 = Http::withHeaders($headers3)
+                        $request3 = Http::withHeaders($headers3)
                             ->timeout($this->apiTimeout)
-                            ->connectTimeout(10)
-                            ->post($this->apiUrl . '/api/licenses/create', $payload);
+                            ->connectTimeout(10);
+                        $request3 = $this->applySslSettings($request3);
+                        $response3 = $request3->post($this->apiUrl . '/api/licenses/create', $payload);
                     } catch (\Illuminate\Http\Client\ConnectionException $e) {
                         Log::error('Vital API: Connection error on license creation (Attempt 3)', [
                             'error' => $e->getMessage(),
@@ -417,10 +438,11 @@ class LicenseKeyService
                     ]);
 
                     try {
-                        $response4 = Http::withHeaders($headers4)
+                        $request4 = Http::withHeaders($headers4)
                             ->timeout($this->apiTimeout)
-                            ->connectTimeout(10)
-                            ->post($this->apiUrl . '/api/licenses/create', $payload);
+                            ->connectTimeout(10);
+                        $request4 = $this->applySslSettings($request4);
+                        $response4 = $request4->post($this->apiUrl . '/api/licenses/create', $payload);
                     } catch (\Illuminate\Http\Client\ConnectionException $e) {
                         Log::error('Vital API: Connection error on license creation (Attempt 4)', [
                             'error' => $e->getMessage(),
@@ -556,10 +578,11 @@ class LicenseKeyService
             ];
 
             // Public endpoint: only RemoteManagementApiKey needed
-            $response = Http::withHeaders($this->getPublicHeaders())
+            $activateRequest = Http::withHeaders($this->getPublicHeaders())
                 ->timeout($this->apiTimeout)
-                ->connectTimeout(10)
-                ->post($this->apiUrl . '/api/licenses/activate', $payload);
+                ->connectTimeout(10);
+            $activateRequest = $this->applySslSettings($activateRequest);
+            $response = $activateRequest->post($this->apiUrl . '/api/licenses/activate', $payload);
 
             Log::info('Vital API: License activation response', [
                 'status' => $response->status(),
@@ -635,13 +658,14 @@ class LicenseKeyService
             }
 
             // Public endpoint: only RemoteManagementApiKey needed
-            $response = Http::withHeaders([
+            $validateRequest = Http::withHeaders([
                     'RemoteManagementApiKey' => $this->remoteApiKey,
                 ])
                 ->timeout($this->apiTimeout)
                 ->connectTimeout(10)
-                ->asMultipart()
-                ->post($this->apiUrl . '/api/licenses/validate', $multipart);
+                ->asMultipart();
+            $validateRequest = $this->applySslSettings($validateRequest);
+            $response = $validateRequest->post($this->apiUrl . '/api/licenses/validate', $multipart);
 
             if ($response->successful()) {
                 return $response->json();
@@ -688,10 +712,11 @@ class LicenseKeyService
             ];
 
             // Public endpoint: only RemoteManagementApiKey needed
-            $response = Http::withHeaders($this->getPublicHeaders())
+            $trialRequest = Http::withHeaders($this->getPublicHeaders())
                 ->timeout($this->apiTimeout)
-                ->connectTimeout(10)
-                ->post($this->apiUrl . '/api/trial-requests', $payload);
+                ->connectTimeout(10);
+            $trialRequest = $this->applySslSettings($trialRequest);
+            $response = $trialRequest->post($this->apiUrl . '/api/trial-requests', $payload);
 
             if ($response->successful()) {
                 $data = $response->json();
