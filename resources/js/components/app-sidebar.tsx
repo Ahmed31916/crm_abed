@@ -37,6 +37,11 @@ export function AppSidebar() {
             icon: Briefcase,
         },
         {
+            title: t('Products'),
+            href: route('products.index'),
+            icon: Package,
+        },
+        {
             title: t('Media Library'),
             href: route('media-library'),
             icon: Image,
