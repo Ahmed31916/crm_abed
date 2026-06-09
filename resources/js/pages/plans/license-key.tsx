@@ -136,15 +136,7 @@ export default function LicenseKey({
                                     <p className="text-sm font-semibold text-green-700 dark:text-green-300">{t('Activated')}</p>
                                 </div>
                             )}
-                            {licenseId && (
-                                <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
-                                    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 mb-1">
-                                        <Key className="h-4 w-4" />
-                                        <span className="text-xs font-medium uppercase tracking-wide">{t('License ID')}</span>
-                                    </div>
-                                    <p className="text-xs font-mono text-gray-900 dark:text-white truncate">{licenseId}</p>
-                                </div>
-                            )}
+                           
                         </div>
 
                         {/* License Key Display */}

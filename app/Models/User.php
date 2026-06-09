@@ -59,6 +59,7 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
         'hardware_id',
         'license_key',
         'license_id',
+        'api_environment',
     ];
 
     /**
