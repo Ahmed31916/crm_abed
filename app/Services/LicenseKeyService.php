@@ -39,7 +39,7 @@ class LicenseKeyService
     protected int $loginTimeout = 45;
     protected int $apiTimeout = 45;
 
-    public function __construct(string $environment = 'test')
+    public function __construct(string $environment = 'production')
     {
         // Load TEST credentials
         $this->testApiUrl = rtrim(env('VITAL_TEST_API_URL', env('VITAL_API_URL', '')), '/');
@@ -57,7 +57,7 @@ class LicenseKeyService
         $this->prodRemoteApiKey = env('VITAL_PROD_API_REMOTE_KEY', 'pm_super_secret_api_key');
         $this->prodVerifySsl = env('VITAL_PROD_API_VERIFY_SSL', true);
 
-        // Set the environment (defaults to test for safety)
+        // Set the environment (defaults to production - only explicit 'test' uses test API)
         $this->setEnvironment($environment);
     }
 
@@ -68,7 +68,9 @@ class LicenseKeyService
      */
     public function setEnvironment(string $environment): self
     {
-        $this->environment = in_array($environment, ['test', 'production']) ? $environment : 'test';
+        // Default to 'production' for any invalid/empty value
+        // Business rule: no env parameter = production (only explicit 'test' = test)
+        $this->environment = $environment === 'test' ? 'test' : 'production';
 
         if ($this->environment === 'production') {
             $this->apiUrl = $this->prodApiUrl;
@@ -387,12 +389,11 @@ class LicenseKeyService
                 : now()->addMonth()->format('Y-m-d\TH:i:s\Z');
 
             $payload = [
-                'userName' => $user->name,
                 'productId' => $this->productId,
                 'issuedTo' => $user->company_name ?? $user->name,
                 'licenseType' => 'Subscription',
                 'expirationDate' => $expirationDate,
-                'maxActiveUsersCount' => 1,
+                'maxActiveUsersCount' => $plan->max_users ?? 1,
             ];
 
             // ====== ATTEMPT 1: Bearer token ONLY ======

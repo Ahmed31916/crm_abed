@@ -103,7 +103,7 @@ class RegisteredUserController extends Controller
             'phone' => $request->phone,
             'country_id' => $request->country_id,
             'hardware_id' => $request->hardware_id,
-            'api_environment' => $request->api_environment ?? 'production',
+            'api_environment' => $request->filled('api_environment') && $request->api_environment === 'test' ? 'test' : 'production',
         ];
 
         // Handle referral code

@@ -42,7 +42,7 @@ type RegisterForm = {
 interface Country {
     id: number;
     name: string;
-    iso_code?: string;
+    code?: string;
     phone_code?: string;
 }
 
@@ -67,7 +67,8 @@ export default function Register({ referralCode, planId, countries, hardwareId, 
         phone: '',
         country_id: '',
         hardware_id: hardwareId || '',
-        api_environment: apiEnvironment || 'production',
+        // IMPORTANT: Only 'test' is recognized; any other value (including empty) = 'production'
+        api_environment: apiEnvironment === 'test' ? 'test' : 'production',
         plan_id: planId,
         referral_code: referralCode,
     });
