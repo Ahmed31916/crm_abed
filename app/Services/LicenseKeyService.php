@@ -393,7 +393,7 @@ class LicenseKeyService
                 'issuedTo' => $user->company_name ?? $user->name,
                 'licenseType' => 'Subscription',
                 'expirationDate' => $expirationDate,
-                'maxActiveUsersCount' => $plan->max_users ?? 1,
+                'maxActiveUsersCount' => 1,
             ];
 
             // ====== ATTEMPT 1: Bearer token ONLY ======
