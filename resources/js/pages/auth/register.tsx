@@ -33,7 +33,6 @@ type RegisterForm = {
     phone: string;
     country_id: string;
     hardware_id: string;
-    api_environment: string;
     recaptcha_token?: string;
     plan_id?: string;
     referral_code?: string;
@@ -46,12 +45,11 @@ interface Country {
     phone_code?: string;
 }
 
-export default function Register({ referralCode, planId, countries, hardwareId, apiEnvironment }: { 
+export default function Register({ referralCode, planId, countries, hardwareId }: { 
     referralCode?: string; 
     planId?: string; 
     countries: Country[];
     hardwareId?: string;
-    apiEnvironment?: string;
 }) {
     const { t } = useTranslation();
     const [recaptchaToken, setRecaptchaToken] = useState<string>('');
@@ -67,8 +65,6 @@ export default function Register({ referralCode, planId, countries, hardwareId, 
         phone: '',
         country_id: '',
         hardware_id: hardwareId || '',
-        // IMPORTANT: Only 'test' is recognized; any other value (including empty) = 'production'
-        api_environment: apiEnvironment === 'test' ? 'test' : 'production',
         plan_id: planId,
         referral_code: referralCode,
     });
@@ -236,9 +232,6 @@ export default function Register({ referralCode, planId, countries, hardwareId, 
                     {data.hardware_id && (
                         <input type="hidden" name="hardware_id" value={data.hardware_id} />
                     )}
-
-                    {/* Hidden API Environment */}
-                    <input type="hidden" name="api_environment" value={data.api_environment} />
 
                     {/* Terms */}
                     <div className="flex items-center !mt-4 !mb-5">

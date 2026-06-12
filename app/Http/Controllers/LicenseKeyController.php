@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Plan;
 use App\Models\PlanRequest;
+use App\Models\User;
 use App\Services\LicenseKeyService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -23,8 +24,8 @@ class LicenseKeyController extends Controller
      * Generate a license key for the authenticated user and selected plan.
      * After successful generation, redirects to the license key display page.
      *
-     * Swagger: POST /api/licenses/create (CreateLicenseRequestDto -> CreateLicenseResponseDto)
-     * Then optionally: POST /api/licenses/activate (ActivateLicenseRequestDto -> ActivateLicenseResponseDto)
+     * POST /api/licenses/create (RemoteManagementApiKey header only)
+     * Then optionally: POST /api/licenses/activate
      */
     public function generate(Request $request)
     {
@@ -60,10 +61,10 @@ class LicenseKeyController extends Controller
             'user_id' => $user->id,
             'plan_id' => $plan->id,
             'duration' => $billingCycle,
-            'status' => 'approved', // It's approved since we're generating the license directly
+            'status' => 'approved',
         ]);
 
-        // Generate the license key via Vital.Manager API (or local fallback)
+        // Generate the license key via Vital.Manager API (production only)
         $result = $this->licenseKeyService->generateLicenseKey(
             $user,
             $plan->id,
@@ -169,7 +170,7 @@ class LicenseKeyController extends Controller
     /**
      * Validate a license key against the Vital.Manager API.
      *
-     * Swagger: POST /api/licenses/validate (multipart/form-data)
+     * POST /api/licenses/validate (multipart/form-data)
      */
     public function validate(Request $request)
     {
@@ -189,9 +190,7 @@ class LicenseKeyController extends Controller
     /**
      * Activate a license on a specific hardware device.
      *
-     * Swagger: POST /api/licenses/activate
-     * Request: ActivateLicenseRequestDto { hardwareId, licenseKey }
-     * Response: ActivateLicenseResponseDto { isSuccessful, message, licenseFileBase64 }
+     * POST /api/licenses/activate
      */
     public function activate(Request $request)
     {
@@ -211,7 +210,7 @@ class LicenseKeyController extends Controller
     /**
      * Submit a trial license request.
      *
-     * Swagger: POST /api/trial-requests (public endpoint)
+     * POST /api/trial-requests (public endpoint)
      */
     public function submitTrialRequest(Request $request)
     {

@@ -36,7 +36,6 @@ class RegisteredUserController extends Controller
         $referralCode = $request->get('ref');
         $encryptedPlanId = $request->get('plan');
         $hardwareId = $request->get('hardware_id');
-        $apiEnvironment = $request->get('env', ''); // 'test' from desktop app, or empty = production
         $planId = null;
         $referrer = null;
 
@@ -63,7 +62,6 @@ class RegisteredUserController extends Controller
             'referrer' => $referrer ? $referrer->name : null,
             'countries' => $countries,
             'hardwareId' => $hardwareId,
-            'apiEnvironment' => strtolower(trim($apiEnvironment)) === 'test' ? 'test' : 'production',
         ]);
     }
 
@@ -84,7 +82,6 @@ class RegisteredUserController extends Controller
             'phone' => 'required|string|max:20',
             'country_id' => 'required|integer|exists:countries,id',
             'hardware_id' => 'nullable|string|max:255',
-            'api_environment' => 'nullable|string|in:test,production',
             'email' => 'required|string|lowercase|email|max:255|unique:'.User::class,
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
             'terms' => 'required|accepted',
@@ -103,7 +100,6 @@ class RegisteredUserController extends Controller
             'phone' => $request->phone,
             'country_id' => $request->country_id,
             'hardware_id' => $request->hardware_id,
-            'api_environment' => $request->filled('api_environment') && $request->api_environment === 'test' ? 'test' : 'production',
         ];
 
         // Handle referral code
