@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\Route;
 
 
 // POST /api/config - جلب الإعدادات عبر POST مع license_key أو hardware_id
-Route::post('/config', [ConfigController::class, 'getConfigPost'])->name('api.config.post');
+Route::post('/config', [ConfigController::class, 'getConfig'])->name('api.config.post');
 
 // ──────────────────────────────────────────────────────────────────────────
 // راوتات المنتجات والتاجات العامة (بدون توثيق - عامة)
