@@ -9,7 +9,9 @@ use Illuminate\Support\Facades\Log;
 
 class LicenseKeyService
 {
-    // Production-only credentials
+    // API credentials - تُقرأ من .env حسب APP_ENV
+    // APP_ENV=production  → يقرأ VITAL_PROD_API_*
+    // APP_ENV=staging     → يقرأ VITAL_STAGING_API_*
     protected string $apiUrl;
     protected string $productId;
     protected string $remoteApiKey;
@@ -19,13 +21,24 @@ class LicenseKeyService
 
     public function __construct()
     {
-        // Load PRODUCTION credentials only
-        $this->apiUrl = rtrim(env('VITAL_PROD_API_URL', ''), '/');
-        $this->productId = env('VITAL_PROD_API_PRODUCT_ID', '');
-        $this->remoteApiKey = env('VITAL_PROD_API_REMOTE_KEY', 'pm_super_secret_api_key');
-        $this->verifySsl = env('VITAL_PROD_API_VERIFY_SSL', true);
+        $env = app()->environment(); // 'production', 'staging', 'local'
 
-        Log::info('LicenseKeyService: Initialized (production only)', [
+        if ($env === 'production') {
+            // ═══ بيئة البرودكشن ═══
+            $this->apiUrl = rtrim(env('VITAL_PROD_API_URL', ''), '/');
+            $this->productId = env('VITAL_PROD_API_PRODUCT_ID', '');
+            $this->remoteApiKey = env('VITAL_PROD_API_REMOTE_KEY', 'pm_super_secret_api_key');
+            $this->verifySsl = env('VITAL_PROD_API_VERIFY_SSL', true);
+        } else {
+            // ═══ بيئة التست / Staging / Local ═══
+            $this->apiUrl = rtrim(env('VITAL_STAGING_API_URL', ''), '/');
+            $this->productId = env('VITAL_STAGING_API_PRODUCT_ID', '');
+            $this->remoteApiKey = env('VITAL_STAGING_API_REMOTE_KEY', 'pm_super_secret_api_key');
+            $this->verifySsl = env('VITAL_STAGING_API_VERIFY_SSL', false);
+        }
+
+        Log::info('LicenseKeyService: Initialized', [
+            'app_env' => $env,
             'api_url' => $this->apiUrl,
             'product_id_set' => !empty($this->productId),
             'remote_key_set' => !empty($this->remoteApiKey),
@@ -177,7 +190,7 @@ class LicenseKeyService
                 Log::error('Vital API: API URL is not configured');
                 return [
                     'success' => false,
-                    'message' => __('License API is not configured. Please set VITAL_PROD_API_URL in .env'),
+                    'message' => __('License API is not configured. Please set VITAL_PROD_API_URL or VITAL_STAGING_API_URL in .env'),
                 ];
             }
 
@@ -185,7 +198,7 @@ class LicenseKeyService
                 Log::error('Vital API: Product ID is not configured');
                 return [
                     'success' => false,
-                    'message' => __('License API product is not configured. Please set VITAL_PROD_API_PRODUCT_ID in .env'),
+                    'message' => __('License API product is not configured. Please set VITAL_PROD_API_PRODUCT_ID or VITAL_STAGING_API_PRODUCT_ID in .env'),
                 ];
             }
 

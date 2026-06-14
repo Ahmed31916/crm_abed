@@ -26,8 +26,9 @@ class LicenseKeyController extends Controller
      * مهم: إذا المستخدم عنده license_key موجود (مستخدم قديم من الديسكتوب)
      * ما ننشئ له license جديدة - نرجعه لصفحة الـ license الحالية.
      *
-     * POST /api/licenses/create (RemoteManagementApiKey header only)
-     * Then optionally: POST /api/licenses/activate
+     * ملاحظة: الـ Service يقرأ إعدادات API من .env تلقائياً
+     * staging → يوصل على API التست
+     * production → يوصل على API البرودكشن
      */
     public function generate(Request $request)
     {
@@ -52,6 +53,7 @@ class LicenseKeyController extends Controller
         if (!empty($user->license_key)) {
             Log::info('LicenseKeyController: User already has a license key, skipping generation', [
                 'user_id' => $user->id,
+                'environment' => $this->licenseKeyService->getEnvironmentName(),
                 'existing_license_key' => $user->license_key,
             ]);
 
@@ -92,7 +94,8 @@ class LicenseKeyController extends Controller
             'status' => 'approved',
         ]);
 
-        // Generate the license key via Vital.Manager API (production only)
+        // Generate the license key via Vital.Manager API
+        // الـ Service يقرأ الإعدادات من .env تلقائياً حسب البيئة
         $result = $this->licenseKeyService->generateLicenseKey(
             $user,
             $plan->id,
@@ -104,6 +107,7 @@ class LicenseKeyController extends Controller
 
         Log::info('LicenseKeyController: After generation', [
             'user_id' => $user->id,
+            'environment' => $this->licenseKeyService->getEnvironmentName(),
             'result_success' => $result['success'] ?? false,
             'result_license_key' => $result['license_key'] ?? 'NOT SET',
             'db_license_key' => $user->license_key ?? 'NULL',
@@ -126,6 +130,7 @@ class LicenseKeyController extends Controller
                 'issuedTo' => $user->company_name ?? $user->name,
                 'licenseId' => $user->license_id ?? $result['license_id'] ?? null,
                 'isActivated' => !empty($user->hardware_id),
+                'environment' => $this->licenseKeyService->getEnvironmentName(),
             ]);
         }
 
@@ -136,6 +141,7 @@ class LicenseKeyController extends Controller
         Log::error('LicenseKeyController: License generation failed', [
             'user_id' => $user->id,
             'plan_id' => $plan->id,
+            'environment' => $this->licenseKeyService->getEnvironmentName(),
             'result' => $result,
             'user_license_key_after' => $user->license_key,
         ]);
@@ -146,8 +152,6 @@ class LicenseKeyController extends Controller
 
     /**
      * Show the license key display page for the authenticated user.
-     * This reads the license key from the user's database record,
-     * so the page can be refreshed without losing data.
      */
     public function show(Request $request)
     {
@@ -192,6 +196,7 @@ class LicenseKeyController extends Controller
             'issuedTo' => $user->company_name ?? $user->name,
             'licenseId' => $user->license_id,
             'isActivated' => !empty($user->hardware_id),
+            'environment' => $this->licenseKeyService->getEnvironmentName(),
         ]);
     }
 

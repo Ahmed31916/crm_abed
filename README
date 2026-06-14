@@ -1,0 +1,20 @@
+سيناريو: بدي أعدّل على اي كود قي المشروع 
+لازم ارفع عالتست وبعدين على البرودكشن
+
+# 1. تأكد إنك على develop
+git checkout develop
+
+# 2. عدّل الكود...
+# ... افتح الملف وعدّل ...
+
+# 3. اختبر محلياً
+php artisan serve
+
+# 4. لما تقتنع إن الشغل تمام
+git add .
+git commit -m "Fix: prevent double license generation"
+
+# 5. ارفع develop لـ GitHub
+git push origin develop
+
+ 

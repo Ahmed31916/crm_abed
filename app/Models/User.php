@@ -162,7 +162,6 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
     {
         // مستخدم قديم عنده license شغال من الديسكتوب
         if (!empty($this->license_key) && $this->plan_is_active) {
-            // نتأكد إن الـ license ما انتهى
             if ($this->plan_expire_date === null || $this->plan_expire_date > now()) {
                 return true;
             }
@@ -204,11 +203,8 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
             return false;
         }
 
-        // ──────────────────────────────────────────────────────────────────
-        // تعديل مهم: إذا المستخدم عنده license_key → ما يحتاج خطة
+        // إذا المستخدم عنده license_key و plan_is_active → ما يحتاج خطة
         // هذا يشمل المستخدمين القُدَم اللي استوردوا الـ license من الديسكتوب
-        // الـ license حقه شغال ومفعّل - ما نلزمه يختار خطة جديدة
-        // ──────────────────────────────────────────────────────────────────
         if (!empty($this->license_key) && $this->plan_is_active) {
             return false;
         }
@@ -219,7 +215,6 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
         }
 
         // Check if user has a plan but no license key (hasn't completed plan selection)
-        // لكن فقط إذا ما عنده license_key من الأساس
         if ($this->plan_id && !$this->license_key) {
             return true;
         }
