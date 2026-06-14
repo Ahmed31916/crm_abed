@@ -36,9 +36,17 @@ return [
     ],
 
     'vital' => [
-        'api_url' => env('VITAL_PROD_API_URL', ''),
-        'product_id' => env('VITAL_PROD_API_PRODUCT_ID', ''),
-        'remote_key' => env('VITAL_PROD_API_REMOTE_KEY', 'pm_super_secret_api_key'),
+        // ─── Production ───
+        'prod_api_url' => env('VITAL_PROD_API_URL', ''),
+        'prod_product_id' => env('VITAL_PROD_API_PRODUCT_ID', ''),
+        'prod_remote_key' => env('VITAL_PROD_API_REMOTE_KEY', 'pm_super_secret_api_key'),
+        'prod_verify_ssl' => env('VITAL_PROD_API_VERIFY_SSL', true),
+
+        // ─── Staging ───
+        'staging_api_url' => env('VITAL_STAGING_API_URL', ''),
+        'staging_product_id' => env('VITAL_STAGING_API_PRODUCT_ID', ''),
+        'staging_remote_key' => env('VITAL_STAGING_API_REMOTE_KEY', 'pm_super_secret_api_key'),
+        'staging_verify_ssl' => env('VITAL_STAGING_API_VERIFY_SSL', false),
     ],
 
 ];
