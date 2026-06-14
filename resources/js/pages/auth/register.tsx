@@ -22,6 +22,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { KeyRound } from 'lucide-react';
 
 type RegisterForm = {
     name: string;
@@ -33,6 +34,7 @@ type RegisterForm = {
     phone: string;
     country_id: string;
     hardware_id: string;
+    license_key: string;
     recaptcha_token?: string;
     plan_id?: string;
     referral_code?: string;
@@ -41,15 +43,17 @@ type RegisterForm = {
 interface Country {
     id: number;
     name: string;
-    code?: string;
+    iso_code?: string;
     phone_code?: string;
 }
 
-export default function Register({ referralCode, planId, countries, hardwareId }: { 
+export default function Register({ referralCode, planId, countries, hardwareId, licenseKey, isLegacyUser }: { 
     referralCode?: string; 
     planId?: string; 
     countries: Country[];
     hardwareId?: string;
+    licenseKey?: string;
+    isLegacyUser?: boolean;
 }) {
     const { t } = useTranslation();
     const [recaptchaToken, setRecaptchaToken] = useState<string>('');
@@ -65,6 +69,7 @@ export default function Register({ referralCode, planId, countries, hardwareId }
         phone: '',
         country_id: '',
         hardware_id: hardwareId || '',
+        license_key: licenseKey || '',
         plan_id: planId,
         referral_code: referralCode,
     });
@@ -79,11 +84,32 @@ export default function Register({ referralCode, planId, countries, hardwareId }
 
     return (
         <AuthLayout
-            title={t("Create your account")}
-            description={t("Enter your details below to get started")}
+            title={isLegacyUser ? t("Link your existing license") : t("Create your account")}
+            description={isLegacyUser 
+                ? t("Your license has been detected. Complete your account details to link it.") 
+                : t("Enter your details below to get started")
+            }
         >
             <form className="space-y-5" onSubmit={submit}>
                 <div className="space-y-4">
+
+                    {/* Legacy User Banner - shown when license_key is present */}
+                    {isLegacyUser && (
+                        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                            <div className="flex items-start gap-3">
+                                <KeyRound className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
+                                <div>
+                                    <p className="text-sm font-medium text-green-800 dark:text-green-300">
+                                        {t("Existing License Detected")}
+                                    </p>
+                                    <p className="text-xs text-green-700 dark:text-green-400 mt-1">
+                                        {t("Your existing license key will be automatically linked to your account. No new license will be created.")}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Full Name */}
                     <div className="relative">
                         <Label htmlFor="name" className="text-gray-700 dark:text-gray-300 font-medium mb-2 block" required>{t("Full name")}</Label>
@@ -233,6 +259,11 @@ export default function Register({ referralCode, planId, countries, hardwareId }
                         <input type="hidden" name="hardware_id" value={data.hardware_id} />
                     )}
 
+                    {/* Hidden License Key - for legacy users coming from desktop app */}
+                    {data.license_key && (
+                        <input type="hidden" name="license_key" value={data.license_key} />
+                    )}
+
                     {/* Terms */}
                     <div className="flex items-center !mt-4 !mb-5">
                         <Checkbox
@@ -268,7 +299,7 @@ export default function Register({ referralCode, planId, countries, hardwareId }
                     className="w-full text-white py-2.5 text-sm font-medium tracking-wide transition-all duration-200 rounded-md shadow-md hover:shadow-lg transform hover:scale-[1.02]"
                     style={{ backgroundColor: primaryColor }}
                 >
-                    {t("Create Account")}
+                    {isLegacyUser ? t("Create Account & Link License") : t("Create Account")}
                 </AuthButton>
 
                 <div className="text-center">

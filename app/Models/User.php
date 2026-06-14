@@ -156,8 +156,19 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
     /**
      * Check if user has an active plan subscription
      */
+    // التعديل: إذا عنده license_key و plan_is_active → خطة فعّالة
+    // حتى لو ما عنده plan_id صريح (مستخدم قديم)
     public function hasActivePlan()
     {
+        // مستخدم قديم عنده license شغال من الديسكتوب
+        if (!empty($this->license_key) && $this->plan_is_active) {
+            // نتأكد إن الـ license ما انتهى
+            if ($this->plan_expire_date === null || $this->plan_expire_date > now()) {
+                return true;
+            }
+        }
+
+        // مستخدم جديد اختار خطة واخد license
         return $this->plan_id && $this->license_key  
             && $this->plan_is_active && 
             ($this->plan_expire_date === null || $this->plan_expire_date > now());
@@ -193,12 +204,22 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
             return false;
         }
 
+        // ──────────────────────────────────────────────────────────────────
+        // تعديل مهم: إذا المستخدم عنده license_key → ما يحتاج خطة
+        // هذا يشمل المستخدمين القُدَم اللي استوردوا الـ license من الديسكتوب
+        // الـ license حقه شغال ومفعّل - ما نلزمه يختار خطة جديدة
+        // ──────────────────────────────────────────────────────────────────
+        if (!empty($this->license_key) && $this->plan_is_active) {
+            return false;
+        }
+
         // Check if user has no plan and no default plan exists
         if (!$this->plan_id) {
             return !Plan::getDefaultPlan();
         }
 
         // Check if user has a plan but no license key (hasn't completed plan selection)
+        // لكن فقط إذا ما عنده license_key من الأساس
         if ($this->plan_id && !$this->license_key) {
             return true;
         }
@@ -580,5 +601,11 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
     public function getRouteKeyName(): string
     {
         return 'slug';
+    }
+
+    // يحدد إذا المستخدم قديم (استورد license من الديسكتوب)
+    public function isLegacyUser()
+    {
+        return !empty($this->license_key) && !empty($this->hardware_id);
     }
 }

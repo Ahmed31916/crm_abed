@@ -12,11 +12,13 @@ use App\Models\LeadStatus;
 use App\Models\OpportunityStage;
 use App\Models\TaskStatus;
 use App\Services\UserService;
+use App\Services\LicenseKeyService;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rules;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -25,6 +27,18 @@ class RegisteredUserController extends Controller
 {
     /**
      * Show the registration page.
+     *
+     * السيناريوهات المدعومة:
+     * ─────────────────────────────────────────────────────────────────────
+     * | 1. مستخدم جديد (بدون license):
+     * |    /register?hardware_id=ABC123
+     * |    → يسجل → يختار خطة → يتم إنشاء license جديدة
+     * |
+     * | 2. مستخدم قديم (عنده license من الديسكتوب):
+     * |    /register?hardware_id=ABC123&license_key=VTL-XXXX-XXXX-XXXX
+     * |    → يسجل → يتم حفظ الـ license الموجودة مباشرة بدون إنشاء واحدة جديدة
+     * |    → يتم توجيهه للداشبورد مباشرة (لا يحتاج اختيار خطة)
+     * ─────────────────────────────────────────────────────────────────────
      */
     public function create(Request $request)
     {
@@ -36,6 +50,7 @@ class RegisteredUserController extends Controller
         $referralCode = $request->get('ref');
         $encryptedPlanId = $request->get('plan');
         $hardwareId = $request->get('hardware_id');
+        $licenseKey = $request->get('license_key'); // للمستخدمين القُدَم اللي عندهم license
         $planId = null;
         $referrer = null;
 
@@ -54,7 +69,10 @@ class RegisteredUserController extends Controller
         }
 
         // Get all active countries for the select dropdown
-        $countries = Country::orderBy('name')->get(['id', 'name', 'code', 'phone_code']);
+        $countries = Country::orderBy('name')->get(['id', 'name', 'iso_code', 'phone_code']);
+
+        // التحقق هل المستخدم القديم (عنده license_key من الديسكتوب)
+        $isLegacyUser = !empty($licenseKey);
 
         return Inertia::render('auth/register', [
             'referralCode' => $referralCode,
@@ -62,6 +80,8 @@ class RegisteredUserController extends Controller
             'referrer' => $referrer ? $referrer->name : null,
             'countries' => $countries,
             'hardwareId' => $hardwareId,
+            'licenseKey' => $licenseKey,
+            'isLegacyUser' => $isLegacyUser,
         ]);
     }
 
@@ -82,10 +102,13 @@ class RegisteredUserController extends Controller
             'phone' => 'required|string|max:20',
             'country_id' => 'required|integer|exists:countries,id',
             'hardware_id' => 'nullable|string|max:255',
+            'license_key' => 'nullable|string|max:255', // للمستخدمين القُدَم
             'email' => 'required|string|lowercase|email|max:255|unique:'.User::class,
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
             'terms' => 'required|accepted',
         ]);
+
+        $isLegacyUser = !empty($request->license_key);
 
         $userData = [
             'name' => $request->name,
@@ -95,12 +118,72 @@ class RegisteredUserController extends Controller
             'is_active' => 1,
             'is_enable_login' => 1,
             'created_by' => 1,
-            'plan_is_active' => 0,
             'company_name' => $request->company_name,
             'phone' => $request->phone,
             'country_id' => $request->country_id,
             'hardware_id' => $request->hardware_id,
         ];
+
+        // ──────────────────────────────────────────────────────────────────
+        // مستخدم قديم - عنده license شغال من الديسكتوب
+        // ──────────────────────────────────────────────────────────────────
+        if ($isLegacyUser) {
+            $userData['license_key'] = $request->license_key;
+            $userData['plan_is_active'] = 1; // الـ license شغال
+
+            // نحاول نتحقق من الـ license عبر API ونستخرج المعلومات
+            $licenseService = app(LicenseKeyService::class);
+            $validationResult = $licenseService->validateAndImportLicense(
+                $request->license_key,
+                $request->hardware_id
+            );
+
+            Log::info('RegisteredUserController: Legacy user registration - license validation', [
+                'license_key' => $request->license_key,
+                'hardware_id' => $request->hardware_id,
+                'validation_success' => $validationResult['success'] ?? false,
+                'validation_source' => $validationResult['source'] ?? 'none',
+            ]);
+
+            // إذا الـ API رجع معلومات مفيدة، نحفظها
+            if (!empty($validationResult['license_id'])) {
+                $userData['license_id'] = $validationResult['license_id'];
+            }
+
+            // إذا الـ API رجع تاريخ انتهاء، نستخدمه
+            if (!empty($validationResult['expiration_date'])) {
+                try {
+                    $expirationDate = \Carbon\Carbon::parse($validationResult['expiration_date']);
+                    $userData['plan_expire_date'] = $expirationDate;
+                } catch (\Exception $e) {
+                    // إذا التاريخ غير صالح، نعطيه سنة افتراضية
+                    $userData['plan_expire_date'] = now()->addYear();
+                }
+            } else {
+                // ما عندنا تاريخ انتهاء من API → نعطيه سنة من الآن كافتراضي
+                // المستخدم القديم لسه شغال على الديسكتوب فـ الـ license فعّال
+                $userData['plan_expire_date'] = now()->addYear();
+            }
+
+            // نحاول نعطيه خطة افتراضية إذا ما عنده
+            if (empty($userData['plan_id'])) {
+                $defaultPlan = Plan::getDefaultPlan();
+                if ($defaultPlan) {
+                    $userData['plan_id'] = $defaultPlan->id;
+                } else {
+                    // أول خطة نشطة كافتراضية
+                    $firstPlan = Plan::where('status', 'active')->first();
+                    if ($firstPlan) {
+                        $userData['plan_id'] = $firstPlan->id;
+                    }
+                }
+            }
+        } else {
+            // ──────────────────────────────────────────────────────────────
+            // مستخدم جديد - لازم يختار خطة ويتم إنشاء license جديدة
+            // ──────────────────────────────────────────────────────────────
+            $userData['plan_is_active'] = 0;
+        }
 
         // Handle referral code
         if ($request->referral_code) {
@@ -127,9 +210,6 @@ class RegisteredUserController extends Controller
         // Create default task statuses
         $this->createDefaultTaskStatuses($user->id);
 
-        // Note: Referral record will be created when user purchases a plan
-        // This is handled in the PlanController or payment controllers
-
         Auth::login($user);
 
         // Check if email verification is enabled
@@ -139,7 +219,21 @@ class RegisteredUserController extends Controller
             return redirect()->route('verification.notice');
         }
 
-        // Always redirect to plans page for new users to select a plan
+        // ──────────────────────────────────────────────────────────────────
+        // التوجيه حسب نوع المستخدم
+        // ──────────────────────────────────────────────────────────────────
+        if ($isLegacyUser) {
+            // مستخدم قديم → مباشرة للداشبورد، عنده license شغال
+            Log::info('RegisteredUserController: Legacy user registered, redirecting to dashboard', [
+                'user_id' => $user->id,
+                'license_key' => $user->license_key,
+            ]);
+
+            return redirect()->route('dashboard')
+                ->with('success', __('Your account has been created and your existing license has been linked successfully.'));
+        }
+
+        // مستخدم جديد → يختار خطة
         return redirect()->route('plans.index');
     }
 

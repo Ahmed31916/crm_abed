@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\Plan;
 use App\Models\PlanRequest;
-use App\Models\User;
 use App\Services\LicenseKeyService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -24,6 +23,9 @@ class LicenseKeyController extends Controller
      * Generate a license key for the authenticated user and selected plan.
      * After successful generation, redirects to the license key display page.
      *
+     * مهم: إذا المستخدم عنده license_key موجود (مستخدم قديم من الديسكتوب)
+     * ما ننشئ له license جديدة - نرجعه لصفحة الـ license الحالية.
+     *
      * POST /api/licenses/create (RemoteManagementApiKey header only)
      * Then optionally: POST /api/licenses/activate
      */
@@ -42,10 +44,36 @@ class LicenseKeyController extends Controller
                 ->with('error', __('Only company users can generate license keys.'));
         }
 
-        // Check if user already has a license key
+        // ──────────────────────────────────────────────────────────────────
+        // فحص مهم: إذا المستخدم عنده license_key موجود بالفعل
+        // هذا يشمل المستخدمين القُدَم اللي استوردوا الـ license من الديسكتوب
+        // ما ننشئ license جديدة - الـ license الحالية شغالة ومفعّلة
+        // ──────────────────────────────────────────────────────────────────
         if (!empty($user->license_key)) {
+            Log::info('LicenseKeyController: User already has a license key, skipping generation', [
+                'user_id' => $user->id,
+                'existing_license_key' => $user->license_key,
+            ]);
+
+            // نحدّث الخطة بس بدون إنشاء license جديدة
+            $plan = Plan::findOrFail($request->plan_id);
+            $billingCycle = $request->billing_cycle;
+
+            $user->update([
+                'plan_id' => $plan->id,
+            ]);
+
+            // Create a PlanRequest record for tracking
+            PlanRequest::create([
+                'user_id' => $user->id,
+                'plan_id' => $plan->id,
+                'duration' => $billingCycle,
+                'status' => 'approved',
+            ]);
+
+            // نوجّه لصفحة الـ license الحالية
             return redirect()->route('license.show')
-                ->with('info', __('You already have a license key.'));
+                ->with('info', __('You already have an active license key. No new license was created.'));
         }
 
         $plan = Plan::findOrFail($request->plan_id);
