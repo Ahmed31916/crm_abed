@@ -13,32 +13,34 @@ class ConfigController extends Controller
      * Get the config/features for a specific user.
      * Used by the desktop application to know what features the user can use.
      *
-     * GET /api/config/{license_key}
-     * or
      * POST /api/config
-     *   Body: { "license_key": "xxx" } or { "hardware_id": "xxx" }
+     * Body: { "license_key": "xxx" } or { "hardware_id": "xxx" }
      *
      * Response:
      * {
-     *   "success": true,
-     *   "user": { "name", "email", "company_name", "license_key", ... },
-     *   "plan": { "id", "name", "price", "duration", ... },
-     *   "config": [
-     *     { "feature_name": "Max Users", "feature_value": "5" },
-     *     { "feature_name": "Storage", "feature_value": "1 GB" },
-     *     ...
-     *   ]
+     * "success": true,
+     * "user": { "name", "email", "company_name", "license_key", ... },
+     * "plan": { "id", "name", "price", "duration", ... },
+     * "config": [
+     * { "feature_name": "Max Users", "feature_value": "5" },
+     * { "feature_name": "Storage", "feature_value": "1 GB" },
+     * ...
+     * ]
      * }
      */
-    public function getConfig(Request $request, $licenseKey = null)
+    public function getConfig(Request $request)
     {
-        // Get license_key from URL param, request body, or query string
-        $licenseKey = $licenseKey 
-            ?? $request->input('license_key') 
-            ?? $request->query('license_key');
+        // التأكد من أن الطلب هو POST فقط
+        if (!$request->isMethod('post')) {
+            return response()->json([
+                'success' => false,
+                'message' => __('Method Not Allowed. Only POST requests are accepted.'),
+            ], 405);
+        }
 
-        $hardwareId = $request->input('hardware_id') 
-            ?? $request->query('hardware_id');
+        // جلب البيانات من الـ Body فقط باستخدام ()post
+        $licenseKey = $request->post('license_key');
+        $hardwareId = $request->post('hardware_id');
 
         // Find user by license_key or hardware_id
         $user = null;
@@ -126,14 +128,5 @@ class ConfigController extends Controller
             ],
             'config' => $config,
         ]);
-    }
-
-    /**
-     * Get config by POST request.
-     * Same as getConfig but accepts POST.
-     */
-    public function getConfigPost(Request $request)
-    {
-        return $this->getConfig($request, null);
     }
 }
