@@ -211,16 +211,7 @@ Route::post('/change-language', [TranslationController::class, 'changeLanguage']
 
 // Custom Page Route
 Route::get('/page/{slug}', [CustomPageController::class, 'show'])->name('custom-page.show');
-
-// // GET /api/config/{license_key} - Get config by license key in URL
-// Route::get('api/config/{license_key}', [ConfigController::class, 'getConfig'])->name('api.config.get');
-
-// // GET /api/config?license_key=xxx or ?hardware_id=xxx
-// Route::get('api/config', [ConfigController::class, 'getConfig'])->name('api.config.query');
-
-// POST /api/config - Get config by POST body { license_key } or { hardware_id }
-Route::post('api/config', [ConfigController::class, 'getConfigPost'])->name('api.config.post');
-
+ 
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('license/generate', [App\Http\Controllers\LicenseKeyController::class, 'generate'])->name('license.generate');
@@ -1249,22 +1240,4 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('invoices/preview/{templateId}/{color}', [InvoiceController::class, 'previewTemplate'])->name('invoice.preview');
 });
 
-
-Route::prefix('api')->group(function () {
-
-    // جلب قائمة المنتجات لشركة معينة
-    // GET /api/{slug}/vital-products
-    Route::get('/{slug}/vital-products/list', [ProductApiController::class, 'vitalProductList']);
-
-    // جلب تفاصيل منتج واحد
-    // GET /api/{slug}/products/{productId}
-    Route::get('/{slug}/vital-products/{productId}', [ProductApiController::class, 'vitalProductShow']);
-
-    // جلب قائمة التاجات لشركة معينة
-    // GET /api/{slug}/tags
-    Route::get('/{slug}/tags', [ProductApiController::class, 'vitalTagsList']);
-
-    // جلب معلومات الشركة العامة
-    // GET /api/{slug}/info
-    Route::get('/{slug}/info', [ProductApiController::class, 'vitalCompanyInfo']);
-});
+ 
