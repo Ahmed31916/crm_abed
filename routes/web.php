@@ -212,11 +212,11 @@ Route::post('/change-language', [TranslationController::class, 'changeLanguage']
 // Custom Page Route
 Route::get('/page/{slug}', [CustomPageController::class, 'show'])->name('custom-page.show');
 
-// GET /api/config/{license_key} - Get config by license key in URL
-Route::get('api/config/{license_key}', [ConfigController::class, 'getConfig'])->name('api.config.get');
+// // GET /api/config/{license_key} - Get config by license key in URL
+// Route::get('api/config/{license_key}', [ConfigController::class, 'getConfig'])->name('api.config.get');
 
-// GET /api/config?license_key=xxx or ?hardware_id=xxx
-Route::get('api/config', [ConfigController::class, 'getConfig'])->name('api.config.query');
+// // GET /api/config?license_key=xxx or ?hardware_id=xxx
+// Route::get('api/config', [ConfigController::class, 'getConfig'])->name('api.config.query');
 
 // POST /api/config - Get config by POST body { license_key } or { hardware_id }
 Route::post('api/config', [ConfigController::class, 'getConfigPost'])->name('api.config.post');

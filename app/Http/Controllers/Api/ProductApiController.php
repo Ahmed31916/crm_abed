@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\DB;
 /**
  * API Controller: Public Product & Tag Listing
  *
- * النسخة المتكيفة من الـ API مع المشروع الجديد (CRM)
+ * النسخة المتكيمة من الـ API مع المشروع الجديد (CRM)
  *
  * التعديلات الرئيسية من المشروع القديم:
  * ─────────────────────────────────────────────────────────────────────
@@ -40,6 +40,10 @@ class ProductApiController extends Controller
      * Route: GET /api/{slug}/products
      *
      * مطابق تماماً لـ API القديم مع كل بيانات HealthProduct
+     *
+     * فلتر updated_since:
+     * يسمح بجلب المنتجات التي تم تعديلها في تاريخ معين أو بعده
+     * الصيغ المدعومة: أي صيغة تاريخ صالحة في PHP (مثال: 2025-01-15, 2025-01-15T10:30:00)
      */
     public function vitalProductList(Request $request, $slug)
     {
@@ -157,12 +161,32 @@ class ProductApiController extends Controller
             }
 
             // ========================================================================
+            // فلترة حسب تاريخ التعديل (updated_since)
+            // يرجع المنتجات التي تم تعديلها في التاريخ المحدد أو بعده
+            // الصيغ المدعومة: 2025-01-15 , 2025-01-15T10:30:00 , أي صيغة تاريخ PHP صالحة
+            // ========================================================================
+            if ($request->filled('updated_since')) {
+                $date = $request->input('updated_since');
+                try {
+                    $parsedDate = \Carbon\Carbon::parse($date);
+                    $query->where('updated_at', '>=', $parsedDate);
+                } catch (\Exception $e) {
+                    // إذا كان التاريخ غير صالح، نرجع خطأ واضح بدل تجاهل الفلتر بصمت
+                    return response()->json([
+                        'error'   => 'Invalid date format',
+                        'message' => 'The updated_since parameter must be a valid date. Examples: 2025-01-15, 2025-01-15T10:30:00',
+                        'received' => $date,
+                    ], 422);
+                }
+            }
+
+            // ========================================================================
             // الترتيب
             // ========================================================================
             $sortBy = $request->input('sort_by', 'id');
             $sortDir = $request->input('sort_dir', 'desc');
 
-            $allowedSortFields = ['id', 'name', 'price', 'created_at'];
+            $allowedSortFields = ['id', 'name', 'price', 'created_at', 'updated_at'];
             if (!in_array($sortBy, $allowedSortFields)) {
                 $sortBy = 'id';
             }
@@ -195,13 +219,14 @@ class ProductApiController extends Controller
                     'total'        => $products->total(),
                 ],
                 'filters' => [
-                    'tag'          => $request->input('tag'),
-                    'tag_id'       => $request->input('tag_id'),
-                    'search'       => $request->input('search'),
-                    'category_id'  => $request->input('category_id'),
-                    'has_discount' => $request->input('has_discount'),
-                    'sort_by'      => $sortBy,
-                    'sort_dir'     => $sortDir,
+                    'tag'           => $request->input('tag'),
+                    'tag_id'        => $request->input('tag_id'),
+                    'search'        => $request->input('search'),
+                    'category_id'   => $request->input('category_id'),
+                    'has_discount'  => $request->input('has_discount'),
+                    'updated_since' => $request->input('updated_since'),
+                    'sort_by'       => $sortBy,
+                    'sort_dir'      => $sortDir,
                 ],
             ], 200);
 
@@ -236,9 +261,26 @@ class ProductApiController extends Controller
                 $query->where('name', 'LIKE', "%{$request->search}%");
             }
 
+            // ========================================================================
+            // فلترة حسب تاريخ التعديل (updated_since) للتاجات أيضاً
+            // ========================================================================
+            if ($request->filled('updated_since')) {
+                $date = $request->input('updated_since');
+                try {
+                    $parsedDate = \Carbon\Carbon::parse($date);
+                    $query->where('updated_at', '>=', $parsedDate);
+                } catch (\Exception $e) {
+                    return response()->json([
+                        'error'    => 'Invalid date format',
+                        'message'  => 'The updated_since parameter must be a valid date. Examples: 2025-01-15, 2025-01-15T10:30:00',
+                        'received' => $date,
+                    ], 422);
+                }
+            }
+
             $sortBy = $request->input('sort_by', 'name');
             $sortDir = $request->input('sort_dir', 'asc');
-            $allowedSortFields = ['id', 'name', 'slug', 'created_at'];
+            $allowedSortFields = ['id', 'name', 'slug', 'created_at', 'updated_at'];
             if (!in_array($sortBy, $allowedSortFields)) $sortBy = 'name';
             if (!in_array($sortDir, ['asc', 'desc'])) $sortDir = 'asc';
             $query->orderBy($sortBy, $sortDir);
@@ -252,9 +294,10 @@ class ProductApiController extends Controller
             }
 
             $formatTag = fn($tag) => [
-                'id'   => $tag->id,
-                'name' => $tag->name,
-                'slug' => $tag->slug ?? null,
+                'id'         => $tag->id,
+                'name'       => $tag->name,
+                'slug'       => $tag->slug ?? null,
+                'updated_at' => $tag->updated_at?->toIso8601String(),
             ];
 
             if ($request->boolean('all')) {
@@ -501,7 +544,10 @@ class ProductApiController extends Controller
             'dosing_na'           => $dosingNa,
 
             // معرف الرسالة
-            'message_id'          => $product->message_id
+            'message_id'          => $product->message_id,
+
+            // تاريخ التعديل
+            'updated_at'          => $product->updated_at?->toIso8601String(),
         ];
 
         // ──── بيانات إضافية لصفحة التفاصيل ────
