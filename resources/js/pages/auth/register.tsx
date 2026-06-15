@@ -43,7 +43,7 @@ type RegisterForm = {
 interface Country {
     id: number;
     name: string;
-    iso_code?: string;
+    code?: string;
     phone_code?: string;
 }
 
