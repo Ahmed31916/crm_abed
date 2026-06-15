@@ -69,7 +69,7 @@ class RegisteredUserController extends Controller
         }
 
         // Get all active countries for the select dropdown
-        $countries = Country::orderBy('name')->get(['id', 'name', 'iso_code', 'phone_code']);
+        $countries = Country::orderBy('name')->get(['id', 'name', 'code', 'phone_code']);
 
         // التحقق هل المستخدم القديم (عنده license_key من الديسكتوب)
         $isLegacyUser = !empty($licenseKey);
