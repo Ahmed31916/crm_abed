@@ -4,228 +4,121 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Str;
 
 class Tag extends Model
 {
     use HasFactory;
 
+    protected $table = 'tags';
+
     protected $fillable = [
         'name',
         'slug',
         'color',
-        'description',
-        'created_by',
+        'status',
+        'company_id',   // الشركة المالكة (للـ visibility scoping)
+        'created_by',   // المستخدم الذي أنشأ السجل (audit trail)
     ];
 
     protected $casts = [
-        'created_by' => 'integer',
+        'status' => 'string',
     ];
 
-    // ========================================================================
-    // العلاقات (Relationships)
-    // ========================================================================
+    // =========================================================================
+    // =========== BOOT ========================================================
+    // =========================================================================
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        // Auto-generate slug from name if not provided
+        static::saving(function (Tag $tag) {
+            if (empty($tag->slug)) {
+                $slug = Str::slug($tag->name);
+                $original = $slug;
+                $counter = 1;
+                while (Tag::where('slug', $slug)
+                    ->where('id', '!=', $tag->id ?? 0)
+                    ->exists()) {
+                    $slug = $original . '-' . $counter++;
+                }
+                $tag->slug = $slug;
+            }
+        });
+    }
+
+    // =========================================================================
+    // =========== RELATIONSHIPS ===============================================
+    // =========================================================================
 
     /**
-     * المنتجات المرتبطة بهذا التاج
-     * عبر جدول product_tags مع pivot created_by
+     * الشركة المالكة للـ Tag
      */
-    public function products()
+    public function company()
     {
-        return $this->belongsToMany(Product::class, 'product_tags')
-            ->withPivot('created_by')
-            ->withTimestamps();
+        return $this->belongsTo(User::class, 'company_id');
     }
 
     /**
-     * المستخدم اللي أنشأ التاج
-     * القديم: store() → belongsTo(Store::class)
-     * الجديد: creator() → belongsTo(User::class)
+     * المستخدم الذي أنشأ السجل (audit)
      */
     public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');
     }
 
-    // ========================================================================
-    // Scopes
-    // ========================================================================
-
     /**
-     * التاجات اللي أنشأها مستخدم معين
+     * المنتجات المرتبطة بهذا الـ Tag (عبر pivot product_tags)
      */
-    public function scopeCreatedBy($query, $userId)
+    public function products()
     {
-        return $query->where('created_by', $userId);
+        return $this->belongsToMany(Product::class, 'product_tags', 'tag_id', 'product_id')
+            ->withPivot('created_by')
+            ->withTimestamps();
     }
 
+    // =========================================================================
+    // =========== SCOPES ======================================================
+    // =========================================================================
+
     /**
-     * التاجات المرئية لمستخدم معين (تاجاته + تاجات السوبر أدمن)
-     * القديم: where('store_id', $superAdminStoreId)->orWhere('store_id', $storeId)
-     * الجديد: where('created_by', $superAdminId)->orWhere('created_by', $userId)
+     * Scope: Tags visible to a specific company
+     * - يرجع الـ Tags اللي تملكها الشركة نفسها + الـ Tags اللي يملكها السوبر ادمن
+     * - يعتمد على company_id (العمود الأساسي للـ visibility)
+     * - مع fallback إلى created_by للسجلات القديمة
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
+     * @param  int  $companyId
+     * @return \Illuminate\Database\Eloquent\Builder
      */
-    public function scopeVisibleTo($query, $userId)
+    public function scopeVisibleTo(Builder $query, int $companyId): Builder
     {
         $superAdminId = getSuperAdminCompanyId();
 
-        return $query->where(function ($q) use ($userId, $superAdminId) {
-            $q->where('created_by', $userId)
-              ->orWhere('created_by', $superAdminId);
-        });
+        return $query->where(function ($q) use ($companyId, $superAdminId) {
+            $q->where('company_id', $companyId)
+              ->orWhere('company_id', $superAdminId)
+              // Fallback للسجلات القديمة بدون company_id
+              ->orWhereNull('company_id');
+        })->where('status', 'active');
     }
 
     /**
-     * البحث بالاسم
+     * Scope: Tags owned by a specific company only (own tags, no super admin fallback)
      */
-    public function scopeSearch($query, $term)
+    public function scopeForCompany(Builder $query, int $companyId): Builder
     {
-        return $query->where('name', 'LIKE', "%{$term}%");
-    }
-
-    // ========================================================================
-    // Auto-generate slug عند الإنشاء
-    // ========================================================================
-
-    protected static function booted(): void
-    {
-        static::creating(function (self $tag) {
-            if (empty($tag->slug)) {
-                $tag->slug = $tag->generateUniqueSlug($tag->name);
-            }
-        });
-
-        static::updating(function (self $tag) {
-            if ($tag->isDirty('name') && empty($tag->slug)) {
-                $tag->slug = $tag->generateUniqueSlug($tag->name);
-            }
-        });
+        return $query->where('company_id', $companyId);
     }
 
     /**
-     * توليد slug فريد
+     * Scope: Active tags only
      */
-    public function generateUniqueSlug(string $name): string
+    public function scopeActive(Builder $query): Builder
     {
-        $slug = Str::slug($name);
-        $originalSlug = $slug;
-        $count = 1;
-
-        while (self::where('slug', $slug)
-            ->where('id', '!=', $this->id ?? 0)
-            ->exists()
-        ) {
-            $slug = $originalSlug . '-' . $count;
-            $count++;
-        }
-
-        return $slug;
-    }
-
-    // ========================================================================
-    // Helper Methods
-    // ========================================================================
-
-    /**
-     * هل هذا التاج تابع للسوبر أدمن؟
-     */
-    public function isSuperAdminTag(): bool
-    {
-        return $this->created_by == getSuperAdminCompanyId();
-    }
-
-    /**
-     * هل المستخدم الحالي يقدر يعدل هذا التاج؟
-     * فقط صاحب التاج يقدر يعدله
-     */
-    public function canEdit(): bool
-    {
-        return $this->created_by == createdBy();
-    }
-
-    /**
-     * عدد المنتجات المرتبطة بهذا التاج
-     */
-    public function getProductCountAttribute(): int
-    {
-        return $this->products()->count();
-    }
-
-    /**
-     * ربط التاج بمنتج معين لمستخدم معين
-     *
-     * @param int $productId
-     * @param int|null $userId إذا null يستخدم createdBy()
-     * @return void
-     */
-    public function attachToProduct(int $productId, ?int $userId = null): void
-    {
-        $userId = $userId ?? createdBy();
-
-        // تحقق إن التاج مش مربوط بالفعل بنفس المستخدم
-        $exists = \DB::table('product_tags')
-            ->where('product_id', $productId)
-            ->where('tag_id', $this->id)
-            ->where('created_by', $userId)
-            ->exists();
-
-        if (!$exists) {
-            \DB::table('product_tags')->insert([
-                'product_id' => $productId,
-                'tag_id'     => $this->id,
-                'created_by' => $userId,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
-        }
-    }
-
-    /**
-     * فصل التاج عن منتج معين لمستخدم معين
-     */
-    public function detachFromProduct(int $productId, ?int $userId = null): void
-    {
-        $userId = $userId ?? createdBy();
-
-        \DB::table('product_tags')
-            ->where('product_id', $productId)
-            ->where('tag_id', $this->id)
-            ->where('created_by', $userId)
-            ->delete();
-    }
-
-    /**
-     * مزامنة تاجات منتج معين (حذف القديم + إضافة الجديد)
-     *
-     * @param int $productId
-     * @param array $tagIds
-     * @param int|null $userId
-     * @return void
-     */
-    public static function syncProductTags(int $productId, array $tagIds, ?int $userId = null): void
-    {
-        $userId = $userId ?? createdBy();
-
-        // حذف التاجات القديمة لهذا المستخدم على هذا المنتج
-        \DB::table('product_tags')
-            ->where('product_id', $productId)
-            ->where('created_by', $userId)
-            ->delete();
-
-        // إضافة التاجات الجديدة
-        $insertData = [];
-        $now = now();
-        foreach ($tagIds as $tagId) {
-            $insertData[] = [
-                'product_id' => $productId,
-                'tag_id'     => $tagId,
-                'created_by' => $userId,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ];
-        }
-
-        if (!empty($insertData)) {
-            \DB::table('product_tags')->insert($insertData);
-        }
+        return $query->where('status', 'active');
     }
 }
