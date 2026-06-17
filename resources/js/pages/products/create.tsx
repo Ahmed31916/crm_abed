@@ -17,7 +17,7 @@ import { useState, useEffect } from 'react';
 
 export default function ProductCreate() {
     const { t } = useTranslation();
-    const { categories, brands, taxes, users, tags, availableProducts, auth } = usePage().props as any;
+    const { categories, brands, taxes, users, tags, primaryIndications, availableProducts, auth } = usePage().props as any;
     const isCompany = auth?.user?.type === 'company';
     const isSuperAdmin = auth?.user?.isSuperAdmin;
 
@@ -612,21 +612,49 @@ export default function ProductCreate() {
                                 <CardDescription>{t('Clinical and health-specific information')}</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4 pt-4">
-                                {/* Primary Indications */}
+                                {/* Primary Indications - Checkboxes from primary_indications table */}
                                 <div className="space-y-2">
                                     <Label className="text-sm font-medium">{t('Primary Indications')}</Label>
-                                    <div className="flex flex-wrap gap-2 border rounded-md p-2 min-h-[42px]">
-                                        {/* This would ideally be a multi-select with search from PrimaryIndication model */}
-                                        {/* For now using a textarea approach - each line = one indication */}
-                                        <Textarea
-                                            value={data.primary_indications.join('\n')}
-                                            onChange={(e) => handleInputChange('primary_indications', e.target.value.split('\n').filter(v => v.trim()))}
-                                            rows={3}
-                                            placeholder={t('Enter up to 3 indications, one per line')}
-                                            className="min-h-[80px]"
-                                        />
+                                    <div className="border rounded-md p-3 max-h-[200px] overflow-y-auto">
+                                        {primaryIndications && primaryIndications.length > 0 ? (
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                                {primaryIndications.map((indication: { id: number; name: string }) => {
+                                                    const isChecked = data.primary_indications.includes(indication.name);
+                                                    return (
+                                                        <label
+                                                            key={indication.id}
+                                                            className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors hover:bg-accent ${isChecked ? 'bg-primary/10 border-primary' : 'border-input'}`}
+                                                        >
+                                                            <Checkbox
+                                                                checked={isChecked}
+                                                                onCheckedChange={(checked) => {
+                                                                    const newValue = checked
+                                                                        ? [...data.primary_indications, indication.name]
+                                                                        : data.primary_indications.filter((n: string) => n !== indication.name);
+                                                                    handleInputChange('primary_indications', newValue);
+                                                                }}
+                                                            />
+                                                            <span className="text-sm">{indication.name}</span>
+                                                        </label>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <p className="text-sm text-muted-foreground text-center py-4">
+                                                {t('No primary indications available. Please seed the PrimaryIndicationSeeder first.')}
+                                            </p>
+                                        )}
                                     </div>
-                                    <p className="text-xs text-muted-foreground">{t('Enter up to 3 primary indications, one per line')}</p>
+                                    {data.primary_indications.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mt-2">
+                                            {data.primary_indications.map((ind: string) => (
+                                                <Badge key={ind} variant="secondary" className="text-xs">
+                                                    {ind}
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <p className="text-xs text-muted-foreground">{t('Select the primary indications for this product')}</p>
                                 </div>
 
                                 {/* Supports */}

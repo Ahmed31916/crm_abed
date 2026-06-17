@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Brand;
 use App\Models\Tax;
 use App\Models\Tag;
+use App\Models\PrimaryIndication;
 use App\Models\HealthProduct;
 use App\Models\ProductCompanyOverride;
 use App\Models\ProductComparison;
@@ -47,6 +48,12 @@ use Maatwebsite\Excel\Facades\Excel;
  * ║  ├── dosing_upon_rising..dosing_before_sleep (7 fields)            ║
  * ║  └── dosing_na (boolean)                                           ║
  * ║                                                                    ║
+ * ║  TABLE: tags                                                       ║
+ * ║  └── id, name, slug, color, status, company_id                     ║
+ * ║                                                                    ║
+ * ║  TABLE: primary_indications                                        ║
+ * ║  └── id, name, company_id                                          ║
+ * ║                                                                    ║
  * ║  TABLE: product_tags (pivot)                                       ║
  * ║  └── product_id, tag_id, created_by                                ║
  * ║                                                                    ║
@@ -68,6 +75,10 @@ use Maatwebsite\Excel\Facades\Excel;
  * This migration adds: specification, detail,
  * product_weight, tax_status, frequency, slug
  * to the products table + creates product_pairs table.
+ *
+ * REQUIRED MIGRATIONS (added):
+ *  - 2026_06_16_000001_create_tags_table.php (with company_id)
+ *  - 2026_06_16_000002_create_primary_indications_table.php (with company_id)
  */
 class ProductController extends Controller
 {
@@ -147,6 +158,7 @@ class ProductController extends Controller
             'brands' => Brand::where('created_by', $currentCompanyId)->where('status', 'active')->get(['id', 'name']),
             'taxes' => Tax::where('created_by', $currentCompanyId)->where('status', 'active')->get(['id', 'name', 'rate']),
             'tags' => Tag::visibleTo($currentCompanyId)->orderBy('name')->get(['id', 'name', 'color']),
+            'primaryIndications' => PrimaryIndication::visibleTo($currentCompanyId)->orderBy('name')->get(['id', 'name']),
             'users' => auth()->user()->type === 'company'
                 ? \App\Models\User::where('created_by', $currentCompanyId)->select('id', 'name', 'email')->get()
                 : [],
@@ -182,6 +194,7 @@ class ProductController extends Controller
             'brands' => Brand::where('created_by', $currentCompanyId)->where('status', 'active')->get(['id', 'name']),
             'taxes' => Tax::where('created_by', $currentCompanyId)->where('status', 'active')->get(['id', 'name', 'rate']),
             'tags' => Tag::visibleTo($currentCompanyId)->orderBy('name')->get(['id', 'name', 'color']),
+            'primaryIndications' => PrimaryIndication::visibleTo($currentCompanyId)->orderBy('name')->get(['id', 'name']),
             'availableProducts' => Product::where('status', 'active')
                 ->where(function ($q) use ($currentCompanyId, $superAdminId) {
                     $q->where('created_by', $currentCompanyId)->orWhere('created_by', $superAdminId);
@@ -426,6 +439,7 @@ class ProductController extends Controller
             'brands' => Brand::where('created_by', $currentCompanyId)->where('status', 'active')->get(['id', 'name']),
             'taxes' => Tax::where('created_by', $currentCompanyId)->where('status', 'active')->get(['id', 'name', 'rate']),
             'tags' => Tag::visibleTo($currentCompanyId)->orderBy('name')->get(['id', 'name', 'color']),
+            'primaryIndications' => PrimaryIndication::visibleTo($currentCompanyId)->orderBy('name')->get(['id', 'name']),
             'availableProducts' => Product::where('status', 'active')
                 ->where(function ($q) use ($currentCompanyId, $superAdminId) {
                     $q->where('created_by', $currentCompanyId)->orWhere('created_by', $superAdminId);
@@ -814,6 +828,9 @@ class ProductController extends Controller
      * - PrimaryIndication pivot → primary_indications JSON on health_products
      * - cover_image_url → Spatie MediaLibrary (not set here, use product_image_url on health_products)
      * - variant_product, trending, custom_field_status → REMOVED
+     *
+     * NOTE: tags table uses company_id (not created_by).
+     *       product_tags pivot still uses created_by.
      */
     public function importFromExcel(Request $request)
     {
@@ -916,6 +933,7 @@ class ProductController extends Controller
                                 'name'       => $categoryName,
                                 'slug'       => $categorySlug,
                                 'created_by' => $superAdminCompanyId,
+                                'company_id' => $superAdminCompanyId,
                                 'status'     => 'active',
                             ]);
                         }
@@ -1178,6 +1196,7 @@ class ProductController extends Controller
                         }
 
                         // Tags - support both comma and pipe separator
+                        // NOTE: tags table uses company_id (not created_by)
                         $tagsRaw = $this->cleanImportValue($item['tags'] ?? null);
                         if ($tagsRaw && strtolower($tagsRaw) !== 'none') {
                             $tagNames = array_filter(
@@ -1187,8 +1206,8 @@ class ProductController extends Controller
                             foreach ($tagNames as $tagName) {
                                 if (empty($tagName)) continue;
                                 $tag = Tag::firstOrCreate(
-                                    ['name' => $tagName, 'created_by' => $superAdminCompanyId],
-                                    ['slug' => Str::slug($tagName), 'status' => 'active', 'color' => '#6366f1']
+                                    ['name' => $tagName, 'company_id' => $superAdminCompanyId],
+                                    ['slug' => Str::slug($tagName), 'status' => 'active', 'color' => '#6366f1', 'created_by' => $superAdminCompanyId]
                                 );
                                 $tagIds[] = $tag->id;
                             }
@@ -1285,6 +1304,7 @@ class ProductController extends Controller
                         }
 
                         // Tags - support both comma and pipe separator
+                        // NOTE: tags table uses company_id (not created_by)
                         $tagsRaw = $this->cleanImportValue($item['tags'] ?? null);
                         if ($tagsRaw && strtolower($tagsRaw) !== 'none') {
                             $tagNames = array_filter(
@@ -1294,8 +1314,8 @@ class ProductController extends Controller
                             foreach ($tagNames as $tagName) {
                                 if (empty($tagName)) continue;
                                 $tag = Tag::firstOrCreate(
-                                    ['name' => $tagName, 'created_by' => $superAdminCompanyId],
-                                    ['slug' => Str::slug($tagName), 'status' => 'active', 'color' => '#6366f1']
+                                    ['name' => $tagName, 'company_id' => $superAdminCompanyId],
+                                    ['slug' => Str::slug($tagName), 'status' => 'active', 'color' => '#6366f1', 'created_by' => $superAdminCompanyId]
                                 );
                                 $tagIds[] = $tag->id;
                             }
@@ -1386,6 +1406,8 @@ class ProductController extends Controller
 
     /**
      * Save tags to product_tags pivot table
+     * NOTE: product_tags pivot still uses created_by (the company who attached the tag),
+     *       while the tags table itself uses company_id (the company that owns the tag definition).
      */
     private function saveTagsToPivot(int $productId, array $tagIds, int $companyId): void
     {

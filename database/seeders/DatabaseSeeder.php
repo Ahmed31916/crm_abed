@@ -58,6 +58,8 @@ class DatabaseSeeder extends Seeder
                 TaxSeeder::class,
                 BrandSeeder::class,
                 CategorySeeder::class,
+                PrimaryIndicationSeeder::class,
+                TagSeeder::class,
                 ProductSeeder::class,
                 AccountTypeSeeder::class,
                 AccountIndustrySeeder::class,

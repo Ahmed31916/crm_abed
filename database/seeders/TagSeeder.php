@@ -3,220 +3,135 @@
 namespace Database\Seeders;
 
 use App\Models\Tag;
-use App\Models\Product;
 use App\Models\User;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Str;
 
-/**
- * TagSeeder - بيانات وهمية للتاجات
- *
- * يُنشئ:
- * 1. تاجات للسوبر أدمن (تاجات مشتركة لكل الشركات)
- * 2. تاجات خاصة بكل شركة
- * 3. ربط التاجات بالمنتجات (product_tags pivot)
- */
 class TagSeeder extends Seeder
 {
     /**
-     * ألوان متنوعة للتاجات
-     */
-    private array $colors = [
-        '#EF4444', // Red
-        '#F97316', // Orange
-        '#F59E0B', // Amber
-        '#84CC16', // Lime
-        '#22C55E', // Green
-        '#14B8A6', // Teal
-        '#06B6D4', // Cyan
-        '#3B82F6', // Blue
-        '#6366F1', // Indigo
-        '#8B5CF6', // Violet
-        '#A855F7', // Purple
-        '#EC4899', // Pink
-        '#6B7280', // Gray
-    ];
-
-    /**
-     * تاجات السوبر أدمن (تاجات مشتركة عامة)
-     */
-    private array $superAdminTags = [
-        // تصنيفات عامة
-        ['name' => 'Featured',       'description' => 'Featured and highlighted products'],
-        ['name' => 'New Arrival',    'description' => 'Recently added products'],
-        ['name' => 'Best Seller',    'description' => 'Top selling products'],
-        ['name' => 'On Sale',        'description' => 'Products currently on sale'],
-        ['name' => 'Limited Stock',  'description' => 'Products with limited availability'],
-
-        // فئات الاستخدام
-        ['name' => 'For Home',       'description' => 'Products for home use'],
-        ['name' => 'For Office',     'description' => 'Products for office use'],
-        ['name' => 'Professional',   'description' => 'Professional grade products'],
-        ['name' => 'Eco Friendly',   'description' => 'Environmentally friendly products'],
-        ['name' => 'Premium',        'description' => 'Premium quality products'],
-
-        // حالة التوفر
-        ['name' => 'In Stock',       'description' => 'Currently available'],
-        ['name' => 'Pre Order',      'description' => 'Available for pre-order'],
-        ['name' => 'Coming Soon',    'description' => 'Will be available soon'],
-    ];
-
-    /**
-     * تاجات خاصة بالشركات (لكل شركة تاجاتها)
-     */
-    private array $companyTags = [
-        ['name' => 'Staff Pick',         'description' => 'Recommended by our staff'],
-        ['name' => 'Customer Favorite',  'description' => 'Loved by our customers'],
-        ['name' => 'Exclusive',          'description' => 'Exclusive to our store'],
-        ['name' => 'Bundle Deal',        'description' => 'Available in bundle deals'],
-        ['name' => 'Clearance',          'description' => 'Clearance sale items'],
-        ['name' => 'Top Rated',          'description' => 'Highly rated by customers'],
-        ['name' => 'Recommended',        'description' => 'Our recommendation'],
-        ['name' => 'Value Pack',         'description' => 'Great value for money'],
-    ];
-
-    /**
-     * Run the database seeder.
+     * Run the database seeds.
+     *
+     * ينشئ مجموعة من الـ Tags الصحية الأساسية للسوبر ادمن
+     * لتكون متاحة لكل الشركات
+     *
+     * يملأ كلا العمودين:
+     *   - company_id : الشركة المالكة (السوبر ادمن)
+     *   - created_by : المستخدم الذي أنشأ السجل (السوبر ادمن)
      */
     public function run(): void
     {
-        $superAdmin = User::where('type', 'superadmin')
-            ->orWhere('type', 'super admin')
-            ->first();
+        // الحصول على معرّف السوبر ادمن
+        $superAdminId = $this->getSuperAdminId();
 
-        if (!$superAdmin) {
-            $this->command->warn('No super admin found. Skipping super admin tags.');
+        if (!$superAdminId) {
+            $this->command->warn('TagSeeder: No super admin user found. Skipping.');
             return;
         }
 
-        $superAdminId = $superAdmin->id;
+        // قائمة الـ Tags الصحية
+        $tags = [
+            // ========== الدماغ والأعصاب ==========
+            ['name' => 'Brain Health',       'color' => '#3b82f6'],
+            ['name' => 'Memory Support',     'color' => '#3b82f6'],
+            ['name' => 'Focus & Concentration', 'color' => '#3b82f6'],
+            ['name' => 'Mood Support',       'color' => '#8b5cf6'],
+            ['name' => 'Stress Relief',      'color' => '#8b5cf6'],
+            ['name' => 'Anxiety Support',    'color' => '#8b5cf6'],
 
-        // ========================================================================
-        // 1. إنشاء تاجات السوبر أدمن
-        // ========================================================================
-        $this->command->info('Creating super admin tags...');
+            // ========== النوم ==========
+            ['name' => 'Sleep Support',      'color' => '#6366f1'],
+            ['name' => 'Relaxation',         'color' => '#6366f1'],
 
-        foreach ($this->superAdminTags as $index => $tagData) {
-            Tag::create([
-                'name'        => $tagData['name'],
-                'color'       => $this->colors[$index % count($this->colors)],
-                'description' => $tagData['description'],
-                'created_by'  => $superAdminId,
-            ]);
-        }
+            // ========== الطاقة والمناعة ==========
+            ['name' => 'Energy Boost',       'color' => '#f59e0b'],
+            ['name' => 'Immune Support',     'color' => '#10b981'],
+            ['name' => 'Antioxidant',        'color' => '#10b981'],
+            ['name' => 'Anti-Inflammatory',  'color' => '#ef4444'],
 
-        $this->command->info('Created ' . count($this->superAdminTags) . ' super admin tags.');
+            // ========== الجهاز الهضمي ==========
+            ['name' => 'Digestive Health',   'color' => '#14b8a6'],
+            ['name' => 'Gut Health',         'color' => '#14b8a6'],
+            ['name' => 'Probiotic',          'color' => '#14b8a6'],
+            ['name' => 'Detox Support',      'color' => '#14b8a6'],
 
-        // ========================================================================
-        // 2. إنشاء تاجات لكل شركة
-        // ========================================================================
-        $companies = User::where('type', 'company')->get();
+            // ========== القلب والأوعية ==========
+            ['name' => 'Heart Health',       'color' => '#dc2626'],
+            ['name' => 'Circulation',        'color' => '#dc2626'],
+            ['name' => 'Blood Pressure',     'color' => '#dc2626'],
+            ['name' => 'Cholesterol',        'color' => '#dc2626'],
 
-        foreach ($companies as $company) {
-            $this->command->info("Creating tags for company: {$company->name}");
+            // ========== العظام والمفاصل ==========
+            ['name' => 'Bone Health',        'color' => '#92400e'],
+            ['name' => 'Joint Support',      'color' => '#92400e'],
+            ['name' => 'Muscle Recovery',    'color' => '#92400e'],
 
-            $companyColorOffset = $company->id * 3;
+            // ========== النساء والرجال ==========
+            ['name' => "Women's Health",     'color' => '#ec4899'],
+            ['name' => "Men's Health",       'color' => '#0ea5e9'],
+            ['name' => 'Hormonal Balance',   'color' => '#ec4899'],
 
-            foreach ($this->companyTags as $index => $tagData) {
-                Tag::create([
-                    'name'        => $tagData['name'],
-                    'color'       => $this->colors[($companyColorOffset + $index) % count($this->colors)],
-                    'description' => $tagData['description'],
-                    'created_by'  => $company->id,
-                ]);
+            // ========== البشرة والشعر ==========
+            ['name' => 'Skin Health',        'color' => '#f97316'],
+            ['name' => 'Hair Health',        'color' => '#f97316'],
+            ['name' => 'Anti-Aging',         'color' => '#f97316'],
+
+            // ========== التمثيل الغذائي ==========
+            ['name' => 'Weight Management',  'color' => '#84cc16'],
+            ['name' => 'Blood Sugar',        'color' => '#84cc16'],
+            ['name' => 'Metabolism',         'color' => '#84cc16'],
+
+            // ========== الفيتامينات والمعادن ==========
+            ['name' => 'Vitamin C',          'color' => '#f59e0b'],
+            ['name' => 'Vitamin D',          'color' => '#f59e0b'],
+            ['name' => 'Vitamin B Complex',  'color' => '#f59e0b'],
+            ['name' => 'Magnesium',          'color' => '#f59e0b'],
+            ['name' => 'Zinc',               'color' => '#f59e0b'],
+            ['name' => 'Iron',               'color' => '#f59e0b'],
+            ['name' => 'Omega-3',            'color' => '#06b6d4'],
+            ['name' => 'Calcium',            'color' => '#f59e0b'],
+        ];
+
+        $inserted = 0;
+        foreach ($tags as $tag) {
+            // firstOrCreate لتجنب التكرار
+            $created = Tag::firstOrCreate(
+                [
+                    'name'       => $tag['name'],
+                    'company_id' => $superAdminId,
+                ],
+                [
+                    'slug'       => Str::slug($tag['name']),
+                    'color'      => $tag['color'],
+                    'status'     => 'active',
+                    'created_by' => $superAdminId,   // audit trail
+                ]
+            );
+
+            if ($created->wasRecentlyCreated) {
+                $inserted++;
             }
         }
 
-        $this->command->info('Created tags for ' . $companies->count() . ' companies.');
-
-        // ========================================================================
-        // 3. ربط التاجات بالمنتجات (product_tags pivot)
-        // ========================================================================
-        $this->command->info('Attaching tags to products...');
-
-        // منتجات السوبر أدمن
-        $superAdminProducts = Product::where('created_by', $superAdminId)->get();
-        $superAdminTagIds = Tag::where('created_by', $superAdminId)->pluck('id')->toArray();
-
-        foreach ($superAdminProducts as $product) {
-            // كل منتج سوبر أدمن يربط بـ 2-4 تاجات عشوائية
-            $randomTagIds = $this->getRandomElements($superAdminTagIds, rand(2, 4));
-
-            foreach ($randomTagIds as $tagId) {
-                $this->insertProductTag($product->id, $tagId, $superAdminId);
-            }
-
-            // كل شركة تربط تاجاتها الخاصة على منتجات السوبر أدمن
-            foreach ($companies as $company) {
-                $companyTagIds = Tag::where('created_by', $company->id)->pluck('id')->toArray();
-
-                if (!empty($companyTagIds)) {
-                    $randomCompanyTags = $this->getRandomElements($companyTagIds, rand(1, 3));
-
-                    foreach ($randomCompanyTags as $tagId) {
-                        $this->insertProductTag($product->id, $tagId, $company->id);
-                    }
-                }
-            }
-        }
-
-        // منتجات كل شركة
-        foreach ($companies as $company) {
-            $companyProducts = Product::where('created_by', $company->id)->get();
-            $companyTagIds = Tag::where('created_by', $company->id)->pluck('id')->toArray();
-
-            foreach ($companyProducts as $product) {
-                if (!empty($companyTagIds)) {
-                    $randomTags = $this->getRandomElements($companyTagIds, rand(1, 3));
-
-                    foreach ($randomTags as $tagId) {
-                        $this->insertProductTag($product->id, $tagId, $company->id);
-                    }
-                }
-
-                // ربط تاجات السوبر أدمن بمنتجات الشركة (اختياري)
-                if (!empty($superAdminTagIds)) {
-                    $randomSuperTags = $this->getRandomElements($superAdminTagIds, rand(0, 2));
-
-                    foreach ($randomSuperTags as $tagId) {
-                        $this->insertProductTag($product->id, $tagId, $company->id);
-                    }
-                }
-            }
-        }
-
-        $this->command->info('Tag seeder completed successfully!');
+        $this->command->info("TagSeeder: Inserted {$inserted} new tags (total: " . count($tags) . ").");
     }
 
     /**
-     * إدخال سجل في product_tags بدون تكرار
+     * الحصول على معرّف السوبر ادمن
+     * يبحث عن user حيث type = 'superadmin' أو 'super admin'
      */
-    private function insertProductTag(int $productId, int $tagId, int $createdBy): void
+    private function getSuperAdminId(): ?int
     {
-        \DB::table('product_tags')->insertOrIgnore([
-            'product_id' => $productId,
-            'tag_id'     => $tagId,
-            'created_by' => $createdBy,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-    }
-
-    /**
-     * جلب عناصر عشوائية من مصفوفة
-     */
-    private function getRandomElements(array $array, int $count): array
-    {
-        if (empty($array)) {
-            return [];
+        // إذا كانت الدالة getSuperAdminCompanyId() موجودة (من helpers)
+        if (function_exists('getSuperAdminCompanyId')) {
+            $id = getSuperAdminCompanyId();
+            if ($id) {
+                return $id;
+            }
         }
 
-        $count = min($count, count($array));
-        $keys = array_rand($array, $count);
-
-        if ($count === 1) {
-            return [$array[$keys]];
-        }
-
-        return array_map(fn($key) => $array[$key], (array) $keys);
+        // وإلا، ابحث في جدول users
+        $superAdmin = User::whereIn('type', ['superadmin', 'super admin'])->first();
+        return $superAdmin?->id;
     }
 }

@@ -17,4 +17,13 @@ git commit -m "Fix: prevent double license generation"
 # 5. ارفع develop لـ GitHub
 git push origin develop
 
+
+
+-----------------------
+
+فهم المشروع:
+super admin ينشئ منتجات/تصنيفات/وسوم → تظهر لكل الشركات
+company ينشئ منتجات/تصنيفات/وسوم → تظهر له فقط + للسوبر أدمن
+عند تعديل منتج سوبر أدمن من قبل شركة → تُحفظ التغييرات في product_company_overrides
+الـ scopeVisibleTo هو النمط الموحد في كل الموديلات
  

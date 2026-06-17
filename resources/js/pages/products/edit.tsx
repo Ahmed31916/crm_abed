@@ -25,6 +25,7 @@ export default function ProductEdit() {
         taxes,
         users,
         tags,
+        primaryIndications,
         availableProducts,
         healthProduct,
         override,
@@ -743,15 +744,48 @@ export default function ProductEdit() {
                                 </CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-4 pt-4">
-                                {/* Primary Indications - always editable */}
+                                {/* Primary Indications - always editable (checkboxes from primary_indications table) */}
                                 <div className="space-y-2">
                                     <Label className="text-sm font-medium">{t('Primary Indications')}</Label>
-                                    <Textarea
-                                        value={data.primary_indications.join('\n')}
-                                        onChange={(e) => handleInputChange('primary_indications', e.target.value.split('\n').filter(v => v.trim()))}
-                                        rows={3}
-                                        placeholder={t('Enter up to 3 indications, one per line')}
-                                    />
+                                    <div className="border rounded-md p-3 max-h-[200px] overflow-y-auto">
+                                        {primaryIndications && primaryIndications.length > 0 ? (
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                                {primaryIndications.map((indication: { id: number; name: string }) => {
+                                                    const isChecked = data.primary_indications.includes(indication.name);
+                                                    return (
+                                                        <label
+                                                            key={indication.id}
+                                                            className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors hover:bg-accent ${isChecked ? 'bg-primary/10 border-primary' : 'border-input'}`}
+                                                        >
+                                                            <Checkbox
+                                                                checked={isChecked}
+                                                                onCheckedChange={(checked) => {
+                                                                    const newValue = checked
+                                                                        ? [...data.primary_indications, indication.name]
+                                                                        : data.primary_indications.filter((n: string) => n !== indication.name);
+                                                                    handleInputChange('primary_indications', newValue);
+                                                                }}
+                                                            />
+                                                            <span className="text-sm">{indication.name}</span>
+                                                        </label>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <p className="text-sm text-muted-foreground text-center py-4">
+                                                {t('No primary indications available. Please seed the PrimaryIndicationSeeder first.')}
+                                            </p>
+                                        )}
+                                    </div>
+                                    {data.primary_indications.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mt-2">
+                                            {data.primary_indications.map((ind: string) => (
+                                                <Badge key={ind} variant="secondary" className="text-xs">
+                                                    {ind}
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                    )}
                                     {isLocked && (
                                         <p className="text-xs text-blue-600 flex items-center gap-1">
                                             <Info className="h-3 w-3" />
