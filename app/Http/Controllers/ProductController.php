@@ -1411,13 +1411,26 @@ class ProductController extends Controller
      */
     private function saveTagsToPivot(int $productId, array $tagIds, int $companyId): void
     {
+        // 1) احذف الربط الحالي لهذه الشركة على هذا المنتج
         DB::table('product_tags')
             ->where('product_id', $productId)
             ->where('created_by', $companyId)
             ->delete();
 
+        // 2) نظّف المدخلات:
+        //    - أزِل القيم الفارغة (null, '', 0, false)
+        //    - حوّل كل القيم إلى int (لأن checkbox قد يُرسل string)
+        //    - أزِل التكرار عبر array_unique
+        $cleanTagIds = array_unique(
+            array_filter(
+                array_map(fn($id) => (int) $id, $tagIds),
+                fn($id) => $id > 0
+            )
+        );
+
+        // 3) ابني الـ payload للإدراج (لم يعد فيه أي تكرار)
         $insertData = [];
-        foreach ($tagIds as $tagId) {
+        foreach ($cleanTagIds as $tagId) {
             $insertData[] = [
                 'product_id' => $productId,
                 'tag_id'     => $tagId,
@@ -1426,6 +1439,8 @@ class ProductController extends Controller
                 'updated_at' => now(),
             ];
         }
+
+        // 4) أدرج (batch insert) — آمن الآن لأنه لا يوجد تكرار
         if (!empty($insertData)) {
             DB::table('product_tags')->insert($insertData);
         }
@@ -1436,23 +1451,37 @@ class ProductController extends Controller
      */
     private function syncPairsWellWith(int $productId, array $pairedIds, int $companyId): void
     {
-        // Remove existing pairs for this company
+        // 1) احذف الـ pairs الحالية لهذه الشركة على هذا المنتج
         DB::table('product_pairs')
             ->where('product_id', $productId)
             ->where('created_by', $companyId)
             ->delete();
 
-        // Insert new pairs
+        // 2) نظّف المدخلات:
+        //    - أزِل القيم الفارغة
+        //    - حوّل إلى int
+        //    - أزِل التكرار
+        //    - أزِل المنتج نفسه (لو شذّ وأُرسل ضمن pairs)
+        $cleanPairedIds = array_unique(
+            array_filter(
+                array_map(fn($id) => (int) $id, $pairedIds),
+                fn($id) => $id > 0 && $id !== $productId
+            )
+        );
+
+        // 3) ابني الـ payload
         $insertData = [];
-        foreach ($pairedIds as $pairedId) {
+        foreach ($cleanPairedIds as $pairedId) {
             $insertData[] = [
-                'product_id'       => $productId,
+                'product_id'        => $productId,
                 'paired_product_id' => $pairedId,
-                'created_by'       => $companyId,
-                'created_at'       => now(),
-                'updated_at'       => now(),
+                'created_by'        => $companyId,
+                'created_at'        => now(),
+                'updated_at'        => now(),
             ];
         }
+
+        // 4) أدرج
         if (!empty($insertData)) {
             DB::table('product_pairs')->insert($insertData);
         }
