@@ -109,6 +109,7 @@ class ConfigController extends Controller
                 'email' => $user->email,
                 'company_name' => $user->company_name,
                 'phone' => $user->phone,
+                'slug' => $user->slug,
                 'hardware_id' => $user->hardware_id,
                 'license_key' => $user->license_key,
                 'license_id' => $user->license_id,
