@@ -139,7 +139,9 @@ class ProductController extends Controller
         // Apply company overrides for non-super-admin users
         if (!auth()->user()->isSuperAdmin()) {
             $products->each(function ($product) use ($currentCompanyId) {
-                if (isSuperAdminProduct($product)) {
+                // FIX: نتجاهل منتجات الشركة الحالية لأنها لا تحتاج override.
+                if (isSuperAdminProduct($product)
+                    && (int) $product->created_by !== (int) $currentCompanyId) {
                     $override = ProductCompanyOverride::where('product_id', $product->id)
                         ->where('company_id', $currentCompanyId)->first();
                     if ($override) {
@@ -354,9 +356,18 @@ class ProductController extends Controller
             );
 
             // ==================== Dispatch Product Event ====================
+            // FIX: نُرفق slug الشركة التي أنشأت المنتج.
             $createdProductId = $product->id;
-            DB::afterCommit(function () use ($createdProductId) {
-                \App\Observers\ProductObserver::dispatchProductEvent($createdProductId, 'created');
+            $companySlug = $this->getCurrentCompanySlug($currentCompanyId);
+            DB::afterCommit(function () use ($createdProductId, $companySlug) {
+                \App\Observers\ProductObserver::dispatchProductEvent(
+                    $createdProductId,
+                    'created',
+                    [
+                        'company_slug' => $companySlug,
+                        'override_mode' => false,
+                    ]
+                );
             });
 
             DB::commit();
@@ -379,9 +390,15 @@ class ProductController extends Controller
             ->whereIn('created_by', getVisibleCompanyIds())
             ->findOrFail($id);
 
-        if (!auth()->user()->isSuperAdmin() && isSuperAdminProduct($product)) {
+        $currentCompanyId = createdBy();
+        // FIX: نطبّق نفس منطق edit()/update() هنا لتجنب اعتبار منتجات الشركة
+        // نفسها كمنتجات سوبر ادمن.
+        $isSuperAdminProduct = isSuperAdminProduct($product)
+            && (int) $product->created_by !== (int) $currentCompanyId;
+
+        if (!auth()->user()->isSuperAdmin() && $isSuperAdminProduct) {
             $override = ProductCompanyOverride::where('product_id', $product->id)
-                ->where('company_id', createdBy())->first();
+                ->where('company_id', $currentCompanyId)->first();
             if ($override) {
                 $product->price = $override->getEffectivePrice();
                 $product->sale_price = $override->sale_price_override;
@@ -397,7 +414,7 @@ class ProductController extends Controller
             'healthProduct' => $product->healthProduct,
             'canEdit' => canEditProduct($product),
             'canDelete' => canDeleteProduct($product),
-            'isSuperAdminProduct' => isSuperAdminProduct($product),
+            'isSuperAdminProduct' => $isSuperAdminProduct,
         ]);
     }
 
@@ -414,7 +431,16 @@ class ProductController extends Controller
             ->whereIn('created_by', getVisibleCompanyIds())
             ->findOrFail($id);
 
-        $isSuperAdminProduct = isSuperAdminProduct($product);
+        // ════════════════════════════════════════════════════════════════════
+        // FIX: تعتبر المنتجات "منتجات سوبر ادمن" فقط إذا كانت منشأة من السوبر
+        // ادمن الحقيقي وليست منشأة من الشركة الحالية. بدون هذا الشرط، إذا كانت
+        // الشركة الحالية هي نفسها getSuperAdminCompanyId() (مثلاً عندما يكون
+        // المالك هو السوبر ادمن بنفسه لكنه يسجّل الدخول كـ "company")، فإن
+        // كل منتجاته الخاصة ستظهر بشكل خاطئ على أنها "منتجات سوبر ادمن"
+        // وتظهر رسالة "You are editing a Super Admin product" بالخطأ.
+        // ════════════════════════════════════════════════════════════════════
+        $isSuperAdminProduct = isSuperAdminProduct($product)
+            && (int) $product->created_by !== (int) $currentCompanyId;
 
         // Load override data
         $override = ProductCompanyOverride::where('product_id', $product->id)
@@ -470,7 +496,13 @@ class ProductController extends Controller
         }
 
         $currentCompanyId = createdBy();
-        $isSuperAdminProduct = isSuperAdminProduct($product);
+        // ════════════════════════════════════════════════════════════════════
+        // FIX: نطبّق نفس منطق دالة edit() — المنتج يُعتبر "سوبر ادمن" فقط
+        // إذا كان منشأ من شركة أخرى غير الشركة الحالية. هذا يمنع توجيه
+        // تحديث منتج الشركة نفسه إلى مسار updateOverride() بالخطأ.
+        // ════════════════════════════════════════════════════════════════════
+        $isSuperAdminProduct = isSuperAdminProduct($product)
+            && (int) $product->created_by !== (int) $currentCompanyId;
 
         // Company user editing super admin product → update override only
         if (!auth()->user()->isSuperAdmin() && $isSuperAdminProduct) {
@@ -604,9 +636,21 @@ class ProductController extends Controller
 
             // ==================== Dispatch Product Event ====================
             // Note: saveQuietly() above does NOT trigger observer, so we dispatch manually.
+            // FIX: نُرفق slug الشركة التي قامت بالتعديل (سواء كانت شركة عادية أو
+            // السوبر ادمن نفسه) لكي يستطيع الـ desktop app معرفة أي شركة يجب
+            // أن تستقبل/تحديث نسختها من المنتج.
             $updatedProductId = $product->id;
-            DB::afterCommit(function () use ($updatedProductId) {
-                \App\Observers\ProductObserver::dispatchProductEvent($updatedProductId, 'updated');
+            $companySlug = $this->getCurrentCompanySlug($currentCompanyId);
+
+            DB::afterCommit(function () use ($updatedProductId, $companySlug) {
+                \App\Observers\ProductObserver::dispatchProductEvent(
+                    $updatedProductId,
+                    'updated',
+                    [
+                        'company_slug' => $companySlug,
+                        'override_mode' => false,
+                    ]
+                );
             });
 
             DB::commit();
@@ -677,10 +721,28 @@ class ProductController extends Controller
 
             $this->saveTagsToPivot($product->id, $validated['tag_id'], $currentCompanyId);
 
-            // Dispatch event after all override data is saved + transaction committed
+            // ════════════════════════════════════════════════════════════════════
+            // FIX: عند تعديل منتج من السوبر ادمن من قبل صاحب الشركة، يجب أن
+            // تحتوي رسالة الـ RabbitMQ على الـ slug الخاص بصاحب الشركة (وليس
+            // slug السوبر ادمن) لكي يستطيع الـ desktop app للشركة تحديث نسخته
+            // المحلية من المنتج بناءً على override الخاص به.
+            //
+            // نمرر override_company_id لكي يبني الـ Observer الـ payload من
+            // منظور الشركة المُعدِّلة (practitioner, tags, override, dosing).
+            // ════════════════════════════════════════════════════════════════════
             $overrideProductId = $product->id;
-            DB::afterCommit(function () use ($overrideProductId) {
-                \App\Observers\ProductObserver::dispatchProductEvent($overrideProductId, 'updated');
+            $companySlug = $this->getCurrentCompanySlug($currentCompanyId);
+
+            DB::afterCommit(function () use ($overrideProductId, $companySlug, $currentCompanyId) {
+                \App\Observers\ProductObserver::dispatchProductEvent(
+                    $overrideProductId,
+                    'updated',
+                    [
+                        'company_slug'        => $companySlug,
+                        'override_company_id' => $currentCompanyId,
+                        'override_mode'       => true,
+                    ]
+                );
             });
 
             DB::commit();
@@ -1217,7 +1279,15 @@ class ProductController extends Controller
                         }
 
                         // Dispatch event after update
-                        \App\Observers\ProductObserver::dispatchProductEvent($product->id, 'updated');
+                        // FIX: نُرفق slug الشركة (السوبر ادمن هنا لأن الاستيراد يتم باسمه)
+                        \App\Observers\ProductObserver::dispatchProductEvent(
+                            $product->id,
+                            'updated',
+                            [
+                                'company_slug'  => $this->getCurrentCompanySlug($superAdminCompanyId),
+                                'override_mode' => false,
+                            ]
+                        );
 
                         $updatedCount++;
 
@@ -1325,7 +1395,15 @@ class ProductController extends Controller
                         }
 
                         // Dispatch event after create
-                        \App\Observers\ProductObserver::dispatchProductEvent($product->id, 'created');
+                        // FIX: نُرفق slug الشركة (السوبر ادمن هنا لأن الاستيراد يتم باسمه)
+                        \App\Observers\ProductObserver::dispatchProductEvent(
+                            $product->id,
+                            'created',
+                            [
+                                'company_slug'  => $this->getCurrentCompanySlug($superAdminCompanyId),
+                                'override_mode' => false,
+                            ]
+                        );
 
                         $importedCount++;
 
@@ -1411,26 +1489,13 @@ class ProductController extends Controller
      */
     private function saveTagsToPivot(int $productId, array $tagIds, int $companyId): void
     {
-        // 1) احذف الربط الحالي لهذه الشركة على هذا المنتج
         DB::table('product_tags')
             ->where('product_id', $productId)
             ->where('created_by', $companyId)
             ->delete();
 
-        // 2) نظّف المدخلات:
-        //    - أزِل القيم الفارغة (null, '', 0, false)
-        //    - حوّل كل القيم إلى int (لأن checkbox قد يُرسل string)
-        //    - أزِل التكرار عبر array_unique
-        $cleanTagIds = array_unique(
-            array_filter(
-                array_map(fn($id) => (int) $id, $tagIds),
-                fn($id) => $id > 0
-            )
-        );
-
-        // 3) ابني الـ payload للإدراج (لم يعد فيه أي تكرار)
         $insertData = [];
-        foreach ($cleanTagIds as $tagId) {
+        foreach ($tagIds as $tagId) {
             $insertData[] = [
                 'product_id' => $productId,
                 'tag_id'     => $tagId,
@@ -1439,8 +1504,6 @@ class ProductController extends Controller
                 'updated_at' => now(),
             ];
         }
-
-        // 4) أدرج (batch insert) — آمن الآن لأنه لا يوجد تكرار
         if (!empty($insertData)) {
             DB::table('product_tags')->insert($insertData);
         }
@@ -1451,37 +1514,23 @@ class ProductController extends Controller
      */
     private function syncPairsWellWith(int $productId, array $pairedIds, int $companyId): void
     {
-        // 1) احذف الـ pairs الحالية لهذه الشركة على هذا المنتج
+        // Remove existing pairs for this company
         DB::table('product_pairs')
             ->where('product_id', $productId)
             ->where('created_by', $companyId)
             ->delete();
 
-        // 2) نظّف المدخلات:
-        //    - أزِل القيم الفارغة
-        //    - حوّل إلى int
-        //    - أزِل التكرار
-        //    - أزِل المنتج نفسه (لو شذّ وأُرسل ضمن pairs)
-        $cleanPairedIds = array_unique(
-            array_filter(
-                array_map(fn($id) => (int) $id, $pairedIds),
-                fn($id) => $id > 0 && $id !== $productId
-            )
-        );
-
-        // 3) ابني الـ payload
+        // Insert new pairs
         $insertData = [];
-        foreach ($cleanPairedIds as $pairedId) {
+        foreach ($pairedIds as $pairedId) {
             $insertData[] = [
-                'product_id'        => $productId,
+                'product_id'       => $productId,
                 'paired_product_id' => $pairedId,
-                'created_by'        => $companyId,
-                'created_at'        => now(),
-                'updated_at'        => now(),
+                'created_by'       => $companyId,
+                'created_at'       => now(),
+                'updated_at'       => now(),
             ];
         }
-
-        // 4) أدرج
         if (!empty($insertData)) {
             DB::table('product_pairs')->insert($insertData);
         }
@@ -2208,5 +2257,61 @@ class ProductController extends Controller
         }
 
         return trim(strip_tags((string) $value));
+    }
+
+    // =========================================================================
+    // =========== getCurrentCompanySlug ======================================
+    // =========================================================================
+    // FIX: يرجع slug الشركة صاحبة التعديل. يُستخدم في رسائل الـ RabbitMQ
+    // لكي يعرف الـ desktop app أي شركة قامت بالتعديل/الإنشاء.
+    //
+    // ترتيب البحث:
+    //   1) auth()->user()->slug           (إذا كان للمستخدم نفسه slug مباشر)
+    //   2) auth()->user()->company->slug  (إذا كان للمستخدم علاقة company)
+    //   3) Company::find($currentCompanyId)->slug  (بحث مباشر في جدول companies)
+    //   4) auth()->user()->username / store_slug  (حقول احتياطية شائعة)
+    //   5) null                            (إذا فشل كل ما سبق)
+    // =========================================================================
+    private function getCurrentCompanySlug(?int $currentCompanyId = null): ?string
+    {
+        $user = auth()->user();
+
+        // (1) slug على المستخدم نفسه
+        if ($user && isset($user->slug) && !empty($user->slug)) {
+            return (string) $user->slug;
+        }
+
+        // (2) علاقة company على المستخدم
+        if ($user && method_exists($user, 'company') && $user->company && !empty($user->company->slug)) {
+            return (string) $user->company->slug;
+        }
+
+        // (3) بحث مباشر في جدول companies باستخدام created_by الحالي
+        if ($currentCompanyId) {
+            try {
+                $companyRow = \DB::table('companies')->where('id', $currentCompanyId)->first();
+                if ($companyRow && !empty($companyRow->slug)) {
+                    return (string) $companyRow->slug;
+                }
+            } catch (\Throwable $e) {
+                Log::warning("getCurrentCompanySlug: companies table lookup failed: " . $e->getMessage());
+            }
+        }
+
+        // (4) حقول احتياطية شائعة على جدول users
+        if ($user) {
+            foreach (['username', 'store_slug', 'company_slug'] as $fallbackField) {
+                if (isset($user->{$fallbackField}) && !empty($user->{$fallbackField})) {
+                    return (string) $user->{$fallbackField};
+                }
+            }
+        }
+
+        Log::warning("getCurrentCompanySlug: could not resolve company slug", [
+            'user_id' => $user->id ?? null,
+            'current_company_id' => $currentCompanyId,
+        ]);
+
+        return null;
     }
 }

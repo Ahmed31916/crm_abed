@@ -6,10 +6,11 @@ use App\Models\Product;
 use App\Models\ProductEventOutbox;
 use App\Models\ProductCompanyOverride;
 use App\Models\HealthProduct;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
- 
+
 class ProductObserver
 {
     /**
@@ -18,13 +19,33 @@ class ProductObserver
      * هذه الدالة عامة (public static) بحيث يمكن استدعاؤها من الكنترولر
      * بعد حفظ كل البيانات المرتبطة (health_product, tags, indications, etc.)
      *
-     * @param Product $product
+     * ════════════════════════════════════════════════════════════════════════
+     * ⚠️  ما الجديد (v2)
+     * ════════════════════════════════════════════════════════════════════════
+     * أضفنا معاملاً اختيارياً $overrideCompanyId يسمح للكنترولر بتمرير
+     * ID الشركة التي قامت بالتعديل عند تحديث override على منتج سوبر ادمن.
+     *
+     * لماذا؟
+     *   - في الأصل, buildProductPayload تستخدم $product->created_by لتحديد
+     *     $currentCompanyId الذي يحدد practitioner, tags, override lookup.
+     *   - لكن عندما تُعدّل شركة منتج سوبر ادمن, يجب أن يحتوي الـ payload على
+     *     بيانات الشركة (practitioner, override, tags) وليس بيانات السوبر ادمن.
+     *   - تمرير $overrideCompanyId يحل هذه المشكلة بأن يُبنى الـ payload
+     *     من منظور الشركة المُعدِّلة.
+     *
+     * @param Product   $product
+     * @param int|null  $overrideCompanyId  ID الشركة المُعدِّلة (للـ override mode)
      * @return array
      */
-    public static function buildProductPayload(Product $product): array
+    public static function buildProductPayload(Product $product, ?int $overrideCompanyId = null): array
     {
         $superAdminCompanyId = getSuperAdminCompanyId();
-        $currentCompanyId = $product->created_by;
+        // FIX: في وضع override نستخدم ID الشركة المُعدِّلة بدلاً من created_by
+        $currentCompanyId = $overrideCompanyId ?? (int) $product->created_by;
+
+        // FIX: علامة تخبر الـ desktop app أن هذه رسالة "override" وليست تحديثاً أصلياً
+        $isOverrideMode = $overrideCompanyId !== null
+            && (int) $overrideCompanyId !== (int) $product->created_by;
 
         $price = (double) $product->price;
         $salePrice = (double) ($product->sale_price ?? 0);
@@ -54,9 +75,10 @@ class ProductObserver
 
         // ==================== تحميل اسم الممارس (practitioner) ====================
         // القديم: DB::table('stores')->where('id', $currentStoreId) | الجديد: User model
+        // FIX: في وضع override, هذا سيكون اسم الشركة المُعدِّلة تلقائياً
         $practitioner = null;
         $practitionerSlug = null;
-        $companyUser = \App\Models\User::where('id', $currentCompanyId)->first();
+        $companyUser = User::where('id', $currentCompanyId)->first();
         if ($companyUser) {
             $practitioner = $companyUser->name;
             $practitionerSlug = $companyUser->slug ?? null;
@@ -64,6 +86,7 @@ class ProductObserver
 
         // ==================== Tags - مع دعم company priority ====================
         // القديم: product_tags.store_id | الجديد: product_tags.created_by
+        // FIX: في وضع override, ستبحث عن tags الشركة المُعدِّلة أولاً
         $tags = [];
         $companyTags = DB::table('product_tags')
             ->where('product_id', $product->id)
@@ -128,6 +151,7 @@ class ProductObserver
         // ==================== Company Override ====================
         // القديم: DB::table('product_merchant_overrides')->where('store_id', ...)
         // الجديد: ProductCompanyOverride::where('company_id', ...)
+        // FIX: في وضع override, سيبحث عن override الشركة المُعدِّلة (الصحيح)
         $override = ProductCompanyOverride::where('product_id', $product->id)
             ->where('company_id', $currentCompanyId)
             ->first();
@@ -199,6 +223,17 @@ class ProductObserver
 
             // معرف الرسالة
             'message_id'                => $product->message_id,
+
+            // ════════════════════════════════════════════════════════════════════
+            // ⚠️  حقول جديدة (v2) — لتوجيه الرسالة في الـ desktop app
+            // ════════════════════════════════════════════════════════════════════
+            // company_slug: slug الشركة صاحبة التعديل (التي يجب أن تستقبل الرسالة)
+            // override_mode: true = هذه رسالة "override" على منتج سوبر ادمن,
+            //                false = تحديث أصلي على منتج الشركة نفسها
+            'company_slug'              => $practitionerSlug,
+            'override_mode'             => $isOverrideMode,
+            'owner_company_id'          => (int) $product->created_by,
+            'acting_company_id'         => (int) $currentCompanyId,
         ];
     }
 
@@ -209,11 +244,32 @@ class ProductObserver
      * يستخدم DB::afterCommit() لضمان تنفيذ الـ dispatch بعد commit الـ transaction.
      * هذا يضمن أن الـ payload يحتوي على بيانات كاملة ومحدثة.
      *
-     * @param int $productId
-     * @param string $action (created|updated|deleted)
+     * ════════════════════════════════════════════════════════════════════════
+     * ⚠️  ما الجديد (v2)
+     * ════════════════════════════════════════════════════════════════════════
+     * أضفنا معاملاً ثالثاً اختيارياً $extra = [] يسمح للكنترولر بتمرير:
+     *
+     *   - 'company_slug'        : string|null   slug الشركة المُعدِّلة
+     *   - 'override_company_id' : int|null      ID الشركة المُعدِّلة (يُمرَّر
+     *                                            إلى buildProductPayload لبناء
+     *                                            الـ payload من منظور الشركة)
+     *   - 'override_mode'       : bool          true = override على منتج سوبر ادمن
+     *
+     * التوافق الخلفي:
+     *   - المكالمات القديمة dispatchProductEvent($id, $action) تستمر في العمل
+     *   - في هذه الحالة, الـ payload يُبنى من منظور created_by (السلوك الأصلي)
+     *   - company_slug = practitioner_slug, override_mode = false
+     *
+     * @param int    $productId
+     * @param string $action  (created|updated|deleted)
+     * @param array  $extra   {
+     *     @var string|null $company_slug
+     *     @var int|null    $override_company_id
+     *     @var bool        $override_mode
+     * }
      * @return void
      */
-    public static function dispatchProductEvent(int $productId, string $action): void
+    public static function dispatchProductEvent(int $productId, string $action, array $extra = []): void
     {
         try {
             $product = Product::find($productId);
@@ -229,29 +285,53 @@ class ProductObserver
             $product->increment('message_id');
             $product->refresh();
 
-            $payload = self::buildProductPayload($product);
+            // ════════════════════════════════════════════════════════════════════
+            // FIX: إذا تم تمرير override_company_id, نبني الـ payload من منظور
+            // الشركة المُعدِّلة بدلاً من منظور created_by. هذا يجعل practitioner,
+            // tags, override, dosing_schedule كلها تأتي من بيانات الشركة.
+            // ════════════════════════════════════════════════════════════════════
+            $overrideCompanyId = $extra['override_company_id'] ?? null;
+            $payload = self::buildProductPayload($product, $overrideCompanyId);
             $payload['action'] = $action;
+
+            // إذا مرر الكنترولر company_slug صريحاً, نستخدمه (يفضّل ذلك لأن
+            // الكنترولر يعرف السياق بشكل أفضل). وإلا نعتمد على ما أعادته
+            // buildProductPayload (practitioner_slug).
+            if (array_key_exists('company_slug', $extra) && $extra['company_slug'] !== null) {
+                $payload['company_slug'] = $extra['company_slug'];
+            }
+
+            // إذا مرر الكنترولر override_mode صريحاً, نستخدمه. وإلا نعتمد على
+            // القيمة المحسوبة من override_company_id.
+            if (array_key_exists('override_mode', $extra)) {
+                $payload['override_mode'] = (bool) $extra['override_mode'];
+            }
 
             // تسجيل الـ JSON payload في اللوج للفحص
             Log::info("ProductObserver: Payload built for RabbitMQ", [
-                'product_id' => $productId,
-                'action'     => $action,
-                'payload'    => $payload,
+                'product_id'    => $productId,
+                'action'        => $action,
+                'company_slug'  => $payload['company_slug'] ?? null,
+                'override_mode' => $payload['override_mode'] ?? false,
+                'payload'       => $payload,
             ]);
 
             $outbox = ProductEventOutbox::createAndDispatch($product->id, $action, $payload);
 
             Log::info("ProductObserver: Event dispatched to outbox", [
-                'product_id' => $productId,
-                'action'     => $action,
-                'outbox_id'  => $outbox->id,
-                'status'     => $outbox->status,
+                'product_id'    => $productId,
+                'action'        => $action,
+                'company_slug'  => $payload['company_slug'] ?? null,
+                'override_mode' => $payload['override_mode'] ?? false,
+                'outbox_id'     => $outbox->id,
+                'status'        => $outbox->status,
             ]);
 
         } catch (\Exception $e) {
             Log::error("ProductObserver::dispatchProductEvent: Failed", [
                 'product_id' => $productId,
                 'action'     => $action,
+                'extra'      => $extra,
                 'error'      => $e->getMessage(),
                 'trace'      => $e->getTraceAsString(),
             ]);
@@ -274,6 +354,17 @@ class ProductObserver
 
     /**
      * عند حذف منتج - هذا يعمل بشكل صحيح لأن كل البيانات لسا موجودة
+     *
+     * ملاحظة: حدث deleted() في Laravel Observer لا يقبل معاملات إضافية,
+     * لذا لا يمكن تمرير $extra له. إذا احتجت لتمرير company_slug في
+     * رسالة الحذف, استدعِ يدوياً:
+     *
+     *   ProductObserver::dispatchProductEvent($product->id, 'deleted', [
+     *       'company_slug' => ...,
+     *       'override_company_id' => ...,
+     *   ]);
+     *
+     * قبل تنفيذ $product->delete().
      */
     public function deleted(Product $product): void
     {
@@ -282,9 +373,10 @@ class ProductObserver
             $payload['action'] = 'deleted';
 
             Log::info("ProductObserver: Payload built for RabbitMQ [DELETED]", [
-                'product_id' => $product->id,
-                'action'     => 'deleted',
-                'payload'    => $payload,
+                'product_id'   => $product->id,
+                'action'       => 'deleted',
+                'company_slug' => $payload['company_slug'] ?? null,
+                'payload'      => $payload,
             ]);
 
             ProductEventOutbox::createAndDispatch($product->id, 'deleted', $payload);
