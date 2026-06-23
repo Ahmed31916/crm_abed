@@ -1489,24 +1489,41 @@ class ProductController extends Controller
      */
     private function saveTagsToPivot(int $productId, array $tagIds, int $companyId): void
     {
+        // ════════════════════════════════════════════════════════════════════
+        // FIX: تنظيف الـ tagIds من أي duplicates أو قيم غير صالحة.
+        //
+        // السبب: في بعض الحالات (مثل تعديل منتج سوبر ادمن من قبل شركة) تصل
+        // tag_ids مكررة من الـ frontend (مثلاً نفس tag_id يظهر 2 أو 3 مرات).
+        // جدول product_tags يحتوي على unique constraint على
+        // (product_id, tag_id, created_by) → Duplicate entry error.
+        //
+        // الحل: array_unique + array_values + تصفية القيم غير الرقمية.
+        // ════════════════════════════════════════════════════════════════════
+        $tagIds = array_values(array_unique(
+            array_filter($tagIds, fn($id) => !is_null($id) && $id !== '' && is_numeric($id))
+        ));
+
         DB::table('product_tags')
             ->where('product_id', $productId)
             ->where('created_by', $companyId)
             ->delete();
 
+        if (empty($tagIds)) {
+            return;
+        }
+
         $insertData = [];
+        $now = now();
         foreach ($tagIds as $tagId) {
             $insertData[] = [
                 'product_id' => $productId,
-                'tag_id'     => $tagId,
+                'tag_id'     => (int) $tagId,
                 'created_by' => $companyId,
-                'created_at' => now(),
-                'updated_at' => now(),
+                'created_at' => $now,
+                'updated_at' => $now,
             ];
         }
-        if (!empty($insertData)) {
-            DB::table('product_tags')->insert($insertData);
-        }
+        DB::table('product_tags')->insert($insertData);
     }
 
     /**
@@ -1514,21 +1531,35 @@ class ProductController extends Controller
      */
     private function syncPairsWellWith(int $productId, array $pairedIds, int $companyId): void
     {
+        // FIX: نفس تنظيف الـ duplicates المطبّق في saveTagsToPivot
+        $pairedIds = array_values(array_unique(
+            array_filter($pairedIds, fn($id) => !is_null($id) && $id !== '' && is_numeric($id))
+        ));
+
         // Remove existing pairs for this company
         DB::table('product_pairs')
             ->where('product_id', $productId)
             ->where('created_by', $companyId)
             ->delete();
 
+        if (empty($pairedIds)) {
+            return;
+        }
+
         // Insert new pairs
         $insertData = [];
+        $now = now();
         foreach ($pairedIds as $pairedId) {
+            // تجنّب الإقران الذاتي (المنتج مع نفسه)
+            if ((int) $pairedId === (int) $productId) {
+                continue;
+            }
             $insertData[] = [
-                'product_id'       => $productId,
-                'paired_product_id' => $pairedId,
-                'created_by'       => $companyId,
-                'created_at'       => now(),
-                'updated_at'       => now(),
+                'product_id'        => $productId,
+                'paired_product_id' => (int) $pairedId,
+                'created_by'        => $companyId,
+                'created_at'        => $now,
+                'updated_at'        => $now,
             ];
         }
         if (!empty($insertData)) {
