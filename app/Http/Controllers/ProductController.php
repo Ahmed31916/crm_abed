@@ -446,16 +446,7 @@ class ProductController extends Controller
             ->whereIn('created_by', getVisibleCompanyIds())
             ->findOrFail($id);
 
-        // ════════════════════════════════════════════════════════════════════
-        // FIX: تعتبر المنتجات "منتجات سوبر ادمن" فقط إذا كانت منشأة من السوبر
-        // ادمن الحقيقي وليست منشأة من الشركة الحالية. بدون هذا الشرط، إذا كانت
-        // الشركة الحالية هي نفسها getSuperAdminCompanyId() (مثلاً عندما يكون
-        // المالك هو السوبر ادمن بنفسه لكنه يسجّل الدخول كـ "company")، فإن
-        // كل منتجاته الخاصة ستظهر بشكل خاطئ على أنها "منتجات سوبر ادمن"
-        // وتظهر رسالة "You are editing a Super Admin product" بالخطأ.
-        // ════════════════════════════════════════════════════════════════════
-        $isSuperAdminProduct = isSuperAdminProduct($product)
-            && (int) $product->created_by !== (int) $currentCompanyId;
+        $isSuperAdminProduct = isSuperAdminProduct($product);
 
         // Load override data
         $override = ProductCompanyOverride::where('product_id', $product->id)
@@ -469,85 +460,15 @@ class ProductController extends Controller
             $product->stock_status = $override->getEffectiveStockStatus();
         }
 
-        // ════════════════════════════════════════════════════════════════════
-        // FIX: جلب tags الخاصة بالمنتج مع مراعاة override.
-        //
-        // المشكلة السابقة: كان الكود يستخدم $product->tags التي ترجع كل
-        // tags المنتج (tags السوبر ادمن + tags الشركة) → duplicates في
-        // الـ checkbox list + لا يظهر ما عدّلته الشركة فعلياً.
-        //
-        // الحل:
-        //   - إذا شركة تُعدّل منتج سوبر ادمن: نرجع tags الشركة من
-        //     product_tags WHERE created_by = $currentCompanyId. إذا لم تكن
-        //     الشركة قد حفظت tags خاصة بها بعد، نرجع tags السوبر ادمن
-        //     (initial state).
-        //   - إذا سوبـر ادمن أو شركة تُعدّل منتجها: نرجع $product->tags
-        //     (السلوك الأصلي).
-        // ════════════════════════════════════════════════════════════════════
-        $productTags = $product->tags->map(fn($tag) => ['id' => $tag->id, 'name' => $tag->name])->toArray();
-
-        if (!auth()->user()->isSuperAdmin() && $isSuperAdminProduct) {
-            $companyTagIds = DB::table('product_tags')
-                ->where('product_id', $product->id)
-                ->where('created_by', $currentCompanyId)
-                ->pluck('tag_id')
-                ->unique()
-                ->values()
-                ->toArray();
-
-            if (!empty($companyTagIds)) {
-                // الشركة لديها tags محفوظة → نعرضها
-                $productTags = Tag::whereIn('id', $companyTagIds)
-                    ->orderBy('name')
-                    ->get(['id', 'name'])
-                    ->map(fn($tag) => ['id' => $tag->id, 'name' => $tag->name])
-                    ->toArray();
-            } else {
-                // الشركة لم تحفظ tags بعد → نعرض tags السوبر ادمن كحالة ابتدائية
-                $superAdminTagIds = DB::table('product_tags')
-                    ->where('product_id', $product->id)
-                    ->where('created_by', $superAdminId)
-                    ->pluck('tag_id')
-                    ->unique()
-                    ->values()
-                    ->toArray();
-
-                if (!empty($superAdminTagIds)) {
-                    $productTags = Tag::whereIn('id', $superAdminTagIds)
-                        ->orderBy('name')
-                        ->get(['id', 'name'])
-                        ->map(fn($tag) => ['id' => $tag->id, 'name' => $tag->name])
-                        ->toArray();
-                }
-            }
-        }
-
-        // ════════════════════════════════════════════════════════════════════
-        // FIX: جلب categories سوبر ادمن + الشركة (مش بس الشركة).
-        //
-        // السابق: Category::where('created_by', $currentCompanyId)
-        // → الشركة لا تستطيع اختيار category سوبر ادمن عند التعديل.
-        //
-        // الجديد: whereIn('created_by', [$currentCompanyId, $superAdminId])
-        // → الشركة تشوف categories السوبر ادمن + categories الشركة.
-        // ════════════════════════════════════════════════════════════════════
-        $visibleCompanyIds = [$currentCompanyId, $superAdminId];
-
         return Inertia::render('products/edit', [
             'product' => array_merge($product->toArray(), [
                 'main_image_id' => $product->main_image_id,
                 'additional_image_ids' => $product->additional_image_ids ?: [],
-                'tags' => $productTags,
+                'tags' => $product->tags->map(fn($tag) => ['id' => $tag->id, 'name' => $tag->name])->toArray(),
                 'pairs_well_with_ids' => $product->pairsWellWith->pluck('id')->toArray(),
             ]),
-            'categories' => Category::whereIn('created_by', $visibleCompanyIds)
-                ->where('status', 'active')
-                ->orderBy('name')
-                ->get(['id', 'name']),
-            'brands' => Brand::whereIn('created_by', $visibleCompanyIds)
-                ->where('status', 'active')
-                ->orderBy('name')
-                ->get(['id', 'name']),
+            'categories' => Category::where('created_by', $currentCompanyId)->where('status', 'active')->get(['id', 'name']),
+            'brands' => Brand::where('created_by', $currentCompanyId)->where('status', 'active')->get(['id', 'name']),
             'taxes' => Tax::where('created_by', $currentCompanyId)->where('status', 'active')->get(['id', 'name', 'rate']),
             'tags' => Tag::visibleTo($currentCompanyId)->orderBy('name')->get(['id', 'name', 'color']),
             'primaryIndications' => PrimaryIndication::visibleTo($currentCompanyId)->orderBy('name')->get(['id', 'name']),

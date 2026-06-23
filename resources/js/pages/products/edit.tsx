@@ -102,18 +102,11 @@ export default function ProductEdit() {
         dosing_na: getEffectiveValue('dosing_na', healthProduct?.dosing_na || false),
 
         // ===== Tags & Pairs =====
-        // FIX: تم جلب الـ tags الصحيحة من الـ backend (override الشركة إن وُجدت،
-        // وإلا tags السوبر ادمن كحالة ابتدائية). لا حاجة لأي منطق إضافي هنا.
         tag_id: (product.tags || []).map((tag: any) => tag.id.toString()),
         pairs_well_with: (product.pairs_well_with_ids || []).map((id: number) => id.toString()),
 
         // ===== Primary Indications =====
-        // FIX: استخدام getEffectiveValue لعرض primary_indications من override
-        // الشركة (إن وُجدت)، وإلا نعرضها من healthProduct (السوبر ادمن).
-        // قبل هذا التعديل، كانت الـ form تعرض دائماً primary_indications الخاصة
-        // بالسوبر ادمن، مما يجعل التعديلات التي قامت بها الشركة تختفي عند
-        // إعادة تحميل الصفحة.
-        primary_indications: getEffectiveValue('primary_indications', healthProduct?.primary_indications || []),
+        primary_indications: healthProduct?.primary_indications || [],
 
         // ===== Practitioner / Company Override Exclusive =====
         practitioner_notes: override?.practitioner_notes || '',
@@ -162,7 +155,7 @@ export default function ProductEdit() {
         requiredFields.forEach(({ name, label }) => {
             const value = data[name];
             // Skip locked fields from validation (they're read-only)
-            if (isLocked && ['name', 'product_sku', 'product_form', 'bottle_size', 'price', 'main_image_id'].includes(name)) {
+            if (isLocked && ['name', 'product_sku', 'product_form', 'bottle_size', 'price', 'main_image_id', 'category_id'].includes(name)) {
                 return;
             }
             if (!value || (Array.isArray(value) && value.length === 0)) {
@@ -287,25 +280,33 @@ export default function ProductEdit() {
 
                                 {/* Category + SKU */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {/* Category - always editable */}
-                                    <div className="space-y-2">
-                                        <Label className="text-sm font-medium" required>
-                                            {t('Category')}
-                                        </Label>
-                                        <Select value={data.category_id} onValueChange={(value) => handleInputChange('category_id', value)}>
-                                            <SelectTrigger className={errors.category_id ? 'border-red-500' : ''}>
-                                                <SelectValue placeholder={t('Select Category')} />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {categories?.map((category: any) => (
-                                                    <SelectItem key={category.id} value={category.id.toString()}>
-                                                        {category.name}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        {errors.category_id && <p className="text-xs text-red-500">{errors.category_id}</p>}
-                                    </div>
+                                    {/* Category: read-only LockedField when editing a Super Admin product (company cannot change it); dropdown otherwise */}
+                                    {isLocked ? (
+                                        <LockedField
+                                            label={t('Category')}
+                                            value={product.category?.name || '—'}
+                                            hint={t('Category is set by Super Admin and cannot be changed')}
+                                        />
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <Label className="text-sm font-medium" required>
+                                                {t('Category')}
+                                            </Label>
+                                            <Select value={data.category_id} onValueChange={(value) => handleInputChange('category_id', value)}>
+                                                <SelectTrigger className={errors.category_id ? 'border-red-500' : ''}>
+                                                    <SelectValue placeholder={t('Select Category')} />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {categories?.map((category: any) => (
+                                                        <SelectItem key={category.id} value={category.id.toString()}>
+                                                            {category.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            {errors.category_id && <p className="text-xs text-red-500">{errors.category_id}</p>}
+                                        </div>
+                                    )}
 
                                     {/* SKU - always read-only after creation */}
                                     <LockedField
