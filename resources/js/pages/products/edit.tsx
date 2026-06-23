@@ -102,11 +102,18 @@ export default function ProductEdit() {
         dosing_na: getEffectiveValue('dosing_na', healthProduct?.dosing_na || false),
 
         // ===== Tags & Pairs =====
+        // FIX: تم جلب الـ tags الصحيحة من الـ backend (override الشركة إن وُجدت،
+        // وإلا tags السوبر ادمن كحالة ابتدائية). لا حاجة لأي منطق إضافي هنا.
         tag_id: (product.tags || []).map((tag: any) => tag.id.toString()),
         pairs_well_with: (product.pairs_well_with_ids || []).map((id: number) => id.toString()),
 
         // ===== Primary Indications =====
-        primary_indications: healthProduct?.primary_indications || [],
+        // FIX: استخدام getEffectiveValue لعرض primary_indications من override
+        // الشركة (إن وُجدت)، وإلا نعرضها من healthProduct (السوبر ادمن).
+        // قبل هذا التعديل، كانت الـ form تعرض دائماً primary_indications الخاصة
+        // بالسوبر ادمن، مما يجعل التعديلات التي قامت بها الشركة تختفي عند
+        // إعادة تحميل الصفحة.
+        primary_indications: getEffectiveValue('primary_indications', healthProduct?.primary_indications || []),
 
         // ===== Practitioner / Company Override Exclusive =====
         practitioner_notes: override?.practitioner_notes || '',
