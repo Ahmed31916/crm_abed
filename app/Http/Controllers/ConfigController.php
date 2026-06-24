@@ -61,7 +61,7 @@ class ConfigController extends Controller
         }
 
         // Check if user has an active plan
-        if (!$user->plan_id || !$user->license_key) {
+        if (!$user->license_key) {
             return response()->json([
                 'success' => false,
                 'message' => __('User does not have an active subscription'),
