@@ -153,7 +153,7 @@ class UserController extends BaseController
         }
 
         // ============================================================
-        // LICENSE ID + HARDWARE ID (v4 addition)
+        // LICENSE KEY + HARDWARE ID (v4 addition)
         // ============================================================
         // Read the two optional license-related fields from the request.
         // They are validated in UserRequest as nullable strings; if the
@@ -161,14 +161,14 @@ class UserController extends BaseController
         // These are stored verbatim on the user row — no API call is made
         // here. The desktop client (or LicenseKeyService) can later use
         // them to activate / verify the license.
-        $licenseId  = $request->input('license_id');
+        $licenseKey  = $request->input('license_key');
         $hardwareId = $request->input('hardware_id');
 
         // Trim whitespace and convert empty strings to null so the DB
         // stores a clean NULL instead of ''.
-        $licenseId  = is_string($licenseId)  ? trim($licenseId)  : $licenseId;
+        $licenseKey  = is_string($licenseKey)  ? trim($licenseKey)  : $licenseKey;
         $hardwareId = is_string($hardwareId) ? trim($hardwareId) : $hardwareId;
-        $licenseId  = $licenseId  !== '' ? $licenseId  : null;
+        $licenseKey  = $licenseKey  !== '' ? $licenseKey  : null;
         $hardwareId = $hardwareId !== '' ? $hardwareId : null;
 
         $user = User::create([
@@ -177,7 +177,7 @@ class UserController extends BaseController
             'password'    => Hash::make($request->password),
             'created_by'  => $created_by,
             'lang'        => $userLang,
-            'license_id'  => $licenseId,
+            'license_key'  => $licenseKey,
             'hardware_id' => $hardwareId,
         ]);
 
@@ -215,16 +215,16 @@ class UserController extends BaseController
             $user->email = $request->email;
 
             // ============================================================
-            // LICENSE ID + HARDWARE ID (v4 addition)
+            // LICENSE KEY + HARDWARE ID (v4 addition)
             // ============================================================
             // Same trim/normalize logic as in store(). Allows the admin
             // to update or clear these fields later from the edit form.
-            $licenseId  = $request->input('license_id');
+            $licenseKey  = $request->input('license_key');
             $hardwareId = $request->input('hardware_id');
 
-            $licenseId  = is_string($licenseId)  ? trim($licenseId)  : $licenseId;
+            $licenseKey  = is_string($licenseKey)  ? trim($licenseKey)  : $licenseKey;
             $hardwareId = is_string($hardwareId) ? trim($hardwareId) : $hardwareId;
-            $user->license_id  = $licenseId  !== '' ? $licenseId  : null;
+            $user->license_key  = $licenseKey  !== '' ? $licenseKey  : null;
             $user->hardware_id = $hardwareId !== '' ? $hardwareId : null;
 
             // find and syncing role

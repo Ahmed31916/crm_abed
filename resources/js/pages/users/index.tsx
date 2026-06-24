@@ -671,17 +671,17 @@ export default function Users() {
                                 linkText: t('Roles')
                             } : undefined
                         },
-                        // ===== License ID + Hardware ID (v4 addition) =====
+                        // ===== License Key + Hardware ID (v4 addition) =====
                         // Optional text fields used by the desktop client /
                         // LicenseKeyService. Stored verbatim on the users
                         // table. Visible in both create and edit modes; in
                         // view mode CrudFormModal renders them read-only.
                         {
-                            name: 'license_id',
-                            label: t('License ID'),
+                            name: 'license_key',
+                            label: t('License Key'),
                             type: 'text',
                             required: false,
-                            placeholder: t('Paste the license ID (e.g. UUID)')
+                            placeholder: t('Paste the license key')
                         },
                         {
                             name: 'hardware_id',
@@ -696,9 +696,9 @@ export default function Users() {
                 initialData={currentItem ? {
                     ...currentItem,
                     roles: currentItem.roles && currentItem.roles.length > 0 ? currentItem.roles[0].id.toString() : '',
-                    // Pre-fill license_id / hardware_id from the existing
+                    // Pre-fill license_key / hardware_id from the existing
                     // user record so they show up in edit / view mode.
-                    license_id: currentItem.license_id || '',
+                    license_key: currentItem.license_key || '',
                     hardware_id: currentItem.hardware_id || ''
                 } : null}
                 title={

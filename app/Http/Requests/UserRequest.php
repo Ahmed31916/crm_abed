@@ -30,7 +30,7 @@ class UserRequest extends FormRequest
             'password'         => $this->isMethod('POST') ? 'required|string|min:6' : 'nullable|string|min:6',
             'password_confirmation' => $this->isMethod('POST') ? 'required|same:password' : 'nullable|same:password',
             'roles'            => 'required',
-            'license_id'            => 'nullable|string|max:255',
+            'license_key'            => 'nullable|string|max:255',
             'hardware_id'           => 'nullable|string|max:255',
         ];
     }
