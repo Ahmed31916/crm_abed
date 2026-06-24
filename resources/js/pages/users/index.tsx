@@ -670,13 +670,36 @@ export default function Users() {
                                 link: route('roles.index'),
                                 linkText: t('Roles')
                             } : undefined
+                        },
+                        // ===== License ID + Hardware ID (v4 addition) =====
+                        // Optional text fields used by the desktop client /
+                        // LicenseKeyService. Stored verbatim on the users
+                        // table. Visible in both create and edit modes; in
+                        // view mode CrudFormModal renders them read-only.
+                        {
+                            name: 'license_id',
+                            label: t('License ID'),
+                            type: 'text',
+                            required: false,
+                            placeholder: t('Paste the license ID (e.g. UUID)')
+                        },
+                        {
+                            name: 'hardware_id',
+                            label: t('Hardware ID'),
+                            type: 'text',
+                            required: false,
+                            placeholder: t('Paste the hardware / machine ID')
                         }
                     ],
                     modalSize: 'lg'
                 }}
                 initialData={currentItem ? {
                     ...currentItem,
-                    roles: currentItem.roles && currentItem.roles.length > 0 ? currentItem.roles[0].id.toString() : ''
+                    roles: currentItem.roles && currentItem.roles.length > 0 ? currentItem.roles[0].id.toString() : '',
+                    // Pre-fill license_id / hardware_id from the existing
+                    // user record so they show up in edit / view mode.
+                    license_id: currentItem.license_id || '',
+                    hardware_id: currentItem.hardware_id || ''
                 } : null}
                 title={
                     formMode === 'create'

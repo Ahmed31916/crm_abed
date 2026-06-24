@@ -29,7 +29,9 @@ class UserRequest extends FormRequest
             'email'            => 'required|email|unique:users,email' . ($userId ? ',' . $userId : ''),
             'password'         => $this->isMethod('POST') ? 'required|string|min:6' : 'nullable|string|min:6',
             'password_confirmation' => $this->isMethod('POST') ? 'required|same:password' : 'nullable|same:password',
-            'roles'            => 'required'
+            'roles'            => 'required',
+            'license_id'            => 'nullable|string|max:255',
+            'hardware_id'           => 'nullable|string|max:255',
         ];
     }
 }
