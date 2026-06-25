@@ -29,6 +29,15 @@ export default function Users() {
     const permissions = auth?.permissions || [];
     const getInitials = useInitials();
 
+    // ============================================================
+    // MODIFICATION: تحديد نوع المستخدم الحالي لإخفاء الميزة عن السوبر ادمن
+    // ============================================================
+    const currentUser = auth?.user;
+    const currentUserType = currentUser?.type || '';
+    const isSuperAdmin = currentUserType === 'superadmin' || currentUserType === 'super admin';
+    const isCompany = currentUserType === 'company';
+    // ============================================================
+
     // State
     const [activeView, setActiveView] = useState(
         ['list', 'grid'].includes(pageFilters.view) ? pageFilters.view : 'list'
@@ -86,6 +95,7 @@ export default function Users() {
             page: 1
         };
 
+
         // Add search and filters
         if (searchTerm) {
             params.search = searchTerm;
@@ -140,6 +150,40 @@ export default function Users() {
         if (formData.roles && Array.isArray(formData.roles)) {
             formData.roles = formData.roles[0];
         }
+
+        // ============================================================
+        // MODIFICATION: للشركة، لا نُرسل roles إن لم تُختر (المودال لا يطلبها)
+        // ============================================================
+        if (isCompany && !formData.roles) {
+            delete formData.roles;
+        }
+        // ============================================================
+
+        // ============================================================
+        // MODIFICATION v6: تنظيف الحقول الفارغة في وضع التعديل
+        // ============================================================
+        // في وضع التعديل: لا نُرسل الباسوورد إن كان فارغاً
+        // حتى لا يُعتبر تعديلاً للباسوورد ويحاول المتحكم تحديثه.
+        // المتحكل يتحقق: إن لم يُرسل password، يحتفظ بالباسوورد الحالي.
+        if (formMode === 'edit') {
+            if (!formData.password || formData.password === '') {
+                delete formData.password;
+            }
+            if (!formData.password_confirmation || formData.password_confirmation === '') {
+                delete formData.password_confirmation;
+            }
+        }
+
+        // trim + normalize empty → undefined لـ license_key و hardware_id
+        // (المتحكل يحوّل السلاسل الفارغة إلى null تلقائياً، لكن نُرسل undefined
+        //  لتفادي إرسال قيم فارغة في الشبكة)
+        ['license_key', 'hardware_id'].forEach((field) => {
+            if (formData[field] !== undefined && formData[field] !== null) {
+                const trimmed = String(formData[field]).trim();
+                formData[field] = trimmed === '' ? undefined : trimmed;
+            }
+        });
+        // ============================================================
 
         if (formMode === 'create') {
             toast.loading(t('Creating user...'));
@@ -290,8 +334,12 @@ export default function Users() {
         });
     }
 
-    // Add the "Add New User" button if user has permission and within limits
-    if (hasPermission(permissions, 'create-users')) {
+    // ============================================================
+    // MODIFICATION: إخفاء زر "Add User" عن السوبر ادمن
+    // ============================================================
+    // زر إضافة المستخدم يظهر فقط لغير السوبر ادمن (للشركة تحديداً)
+    // السوبر ادمن لا يرى هذه الميزة إطلاقاً
+    if (hasPermission(permissions, 'create-users') && !isSuperAdmin) {
         const canCreate = !planLimits || planLimits.can_create;
         pageActions.push({
             label: planLimits && !canCreate ? t('User Limit Reached ({{current}}/{{max}})', { current: planLimits.current_users, max: planLimits.max_users }) : t('Add User'),
@@ -301,6 +349,7 @@ export default function Users() {
             disabled: !canCreate
         });
     }
+    // ============================================================
 
     const breadcrumbs = [
         { title: t('Dashboard'), href: route('dashboard') },
@@ -364,7 +413,7 @@ export default function Users() {
             className: 'text-amber-500',
             requiredPermission: 'toggle-status-users'
         },
-        {
+          {
             label: t('View'),
             icon: 'Eye',
             action: 'view',
@@ -386,6 +435,92 @@ export default function Users() {
             requiredPermission: 'delete-users'
         }
     ];
+
+    // ============================================================
+    // MODIFICATION v6: بناء حقول المودال ديناميكياً حسب نوع المستخدم + وضع المودال
+    // ============================================================
+    // - password و password_confirmation: إلزامية في create، اختيارية في edit
+    //   مع placeholder "Leave blank to keep current password" في وضع التعديل.
+    // - license_key و hardware_id: تظهر دائماً (create + edit) واختيارية.
+    //   للشركة: placeholder يشير إلى أن الترك فارغاً يُورّث القيمة من الشركة.
+    // - roles: يظهر فقط لغير الشركة، اختياري في edit.
+    //
+    // ملاحظة عن إصلاح خطأ التعديل: في الإصدار السابق، حقل password كان
+    // يحمل required: true بشكل ثابت + conditional لإخفائه في edit. لكن
+    // CrudFormModal كان يُحقّق من required حتى لو كان الحقل مخفياً، فكان
+    // يظهر خطأ "The password field is required" عند محاولة التعديل.
+    // الحل: ربط required بـ formMode فعلياً (isCreate) بدلاً من تركه true.
+    const buildFormFields = () => {
+        const isCreate = formMode === 'create';
+
+        const fields: any[] = [
+            { name: 'name', label: t('Name'), type: 'text', required: true },
+            { name: 'email', label: t('Email'), type: 'email', required: true },
+            {
+                name: 'password',
+                label: t('Password'),
+                type: 'password',
+                required: isCreate,
+                conditional: (mode: string) => mode === 'create',
+                placeholder: isCreate ? undefined : t('Leave blank to keep current password')
+            },
+            {
+                name: 'password_confirmation',
+                label: t('Confirm Password'),
+                type: 'password',
+                required: isCreate,
+                conditional: (mode: string) => mode === 'create',
+                placeholder: isCreate ? undefined : t('Leave blank to keep current password')
+            },
+            // ============================================================
+            // v6: حقول license_key + hardware_id — تظهر دائماً (create + edit)
+            // ============================================================
+            {
+                name: 'license_key',
+                label: t('License Key'),
+                type: 'text',
+                required: false,
+                placeholder: isCompany
+                    ? t('Leave blank to inherit from company')
+                    : t('Enter license key')
+            },
+            {
+                name: 'hardware_id',
+                label: t('Hardware ID'),
+                type: 'text',
+                required: false,
+                placeholder: isCompany
+                    ? t('Leave blank to inherit from company')
+                    : t('Enter hardware ID')
+            },
+            // ============================================================
+        ];
+
+        // حقل roles يظهر فقط لغير الشركة (السوبر ادمن أو الأدمن)
+        // الشركة لا تحتاج لاختيار دور - الموظف يُنشأ كـ staff تلقائياً
+        // v6: roles أصبح اختيارياً في edit (لا نُجبر المستخدم على تغيير الدور)
+        if (!isCompany) {
+            fields.push({
+                name: 'roles',
+                label: t('Role'),
+                type: 'select',
+                options: roles ? roles.map((role: any) => ({
+                    value: role.id.toString(),
+                    label: role.label || role.name
+                })) : [],
+                required: isCreate, // مطلوب فقط عند الإنشاء، اختياري عند التعديل
+                emptyNote: !roles || roles.length === 0 ? {
+                    link: route('roles.index'),
+                    linkText: t('Roles')
+                } : undefined
+            });
+        }
+
+        return fields;
+    };
+
+    const formFields = buildFormFields();
+    // ============================================================
 
     return (
         <PageTemplate
@@ -611,7 +746,7 @@ export default function Users() {
                                 </div>
                                 <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">{t('No users found')}</h3>
                                 <p className="text-gray-500 dark:text-gray-400 mb-6">{t('Get started by creating your first user')}</p>
-                                {hasPermission(permissions, 'create-users') && (
+                                {hasPermission(permissions, 'create-users') && !isSuperAdmin && (
                                     <Button onClick={handleAddNew}><Plus className="h-4 w-4 mr-2" />{t('Add User')}</Button>
                                 )}
                             </div>
@@ -640,66 +775,24 @@ export default function Users() {
                 onClose={() => setIsFormModalOpen(false)}
                 onSubmit={handleFormSubmit}
                 formConfig={{
-                    fields: [
-                        { name: 'name', label: t('Name'), type: 'text', required: true },
-                        { name: 'email', label: t('Email'), type: 'email', required: true },
-                        {
-                            name: 'password',
-                            label: t('Password'),
-                            type: 'password',
-                            required: true,
-                            conditional: (mode) => mode === 'create'
-                        },
-                        {
-                            name: 'password_confirmation',
-                            label: t('Confirm Password'),
-                            type: 'password',
-                            required: true,
-                            conditional: (mode) => mode === 'create'
-                        },
-                        {
-                            name: 'roles',
-                            label: t('Role'),
-                            type: 'select',
-                            options: roles ? roles.map((role: any) => ({
-                                value: role.id.toString(),
-                                label: role.label || role.name
-                            })) : [],
-                            required: true,
-                            emptyNote: !roles || roles.length === 0 ? {
-                                link: route('roles.index'),
-                                linkText: t('Roles')
-                            } : undefined
-                        },
-                        // ===== License Key + Hardware ID (v4 addition) =====
-                        // Optional text fields used by the desktop client /
-                        // LicenseKeyService. Stored verbatim on the users
-                        // table. Visible in both create and edit modes; in
-                        // view mode CrudFormModal renders them read-only.
-                        {
-                            name: 'license_key',
-                            label: t('License Key'),
-                            type: 'text',
-                            required: false,
-                            placeholder: t('Paste the license key')
-                        },
-                        {
-                            name: 'hardware_id',
-                            label: t('Hardware ID'),
-                            type: 'text',
-                            required: false,
-                            placeholder: t('Paste the hardware / machine ID')
-                        }
-                    ],
+                    fields: formFields,
                     modalSize: 'lg'
                 }}
                 initialData={currentItem ? {
                     ...currentItem,
                     roles: currentItem.roles && currentItem.roles.length > 0 ? currentItem.roles[0].id.toString() : '',
-                    // Pre-fill license_key / hardware_id from the existing
-                    // user record so they show up in edit / view mode.
+                    // ============================================================
+                    // v6: تعبئة حقول license_key + hardware_id من سجل المستخدم الحالي
+                    // ============================================================
+                    // currentItem يحمل كائن المستخدم القادم من Inertia (يشمل
+                    // license_key و hardware_id لأن المتحكم يُمرّر نموذج User كاملاً).
+                    // نضمن هنا أن القيم نصية (string | '') كي يفهمها الحقل text.
                     license_key: currentItem.license_key || '',
-                    hardware_id: currentItem.hardware_id || ''
+                    hardware_id: currentItem.hardware_id || '',
+                    // في وضع التعديل: لا نُمرّر password حتى لا يظهر كـ autocomplete
+                    password: '',
+                    password_confirmation: ''
+                    // ============================================================
                 } : null}
                 title={
                     formMode === 'create'

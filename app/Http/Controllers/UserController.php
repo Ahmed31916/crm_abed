@@ -116,6 +116,25 @@ class UserController extends BaseController
 
     /**
      * Store a newly created resource in storage.
+     *
+     * ============================================================
+     * MODIFICATION v6: وراثة license_key + hardware_id + slug + plan من الشركة المالكة
+     * ============================================================
+     * عندما ينشئ مستخدم من نوع "company" موظفاً جديداً:
+     *   - يُفرض نوع المستخدم = 'staff'
+     *   - يرث license_key, license_id, hardware_id, slug, company_name,
+     *     plan_id, plan_is_active, plan_expire_date, is_trial, trial_expire_date
+     *     من الشركة المالكة
+     *   - يصبح roles اختيارياً (يمكن للشركة إنشاء موظف بدون دور)
+     * هذا يضمن أن يستطيع الموظف تسجيل الدخول والدخول مباشرة للوحة
+     * التحكم دون توجيهه لصفحة /plans، لأن middleware CheckPlanAccess
+     * يعتمد على created_by لفحص خطة الشركة.
+     *
+     * ملاحظة عن license_key و hardware_id:
+     *   - القيم المُرسلة من الفورم (إن وُجدت) تُفضّل على قيم الشركة
+     *   - إن لم تُرسل من الفورم، تُورَّث من الشركة المالكة
+     *   - هذا يسمح للشركة بتعيين license_key/hardware_id مخصص للموظف
+     *     أو تركها فارغة لتوريث القيم الافتراضية للشركة.
      */
     public function store(UserRequest $request)
     {
@@ -153,43 +172,86 @@ class UserController extends BaseController
         }
 
         // ============================================================
-        // LICENSE KEY + HARDWARE ID (v4 addition)
+        // MODIFICATION v6 START: بناء بيانات المستخدم مع وراثة الخطة + slug + license + hardware
         // ============================================================
-        // Read the two optional license-related fields from the request.
-        // They are validated in UserRequest as nullable strings; if the
-        // request didn't include them at all we fall back to null.
-        // These are stored verbatim on the user row — no API call is made
-        // here. The desktop client (or LicenseKeyService) can later use
-        // them to activate / verify the license.
-        $licenseKey  = $request->input('license_key');
-        $hardwareId = $request->input('hardware_id');
+        $isCompanyCreator = $authUser->type === 'company';
 
-        // Trim whitespace and convert empty strings to null so the DB
-        // stores a clean NULL instead of ''.
-        $licenseKey  = is_string($licenseKey)  ? trim($licenseKey)  : $licenseKey;
-        $hardwareId = is_string($hardwareId) ? trim($hardwareId) : $hardwareId;
-        $licenseKey  = $licenseKey  !== '' ? $licenseKey  : null;
-        $hardwareId = $hardwareId !== '' ? $hardwareId : null;
+        // قراءة الحقول الاختيارية من الفورم (إن وُجدت) مع trim + normalize empty → null
+        $formLicenseKey  = $request->input('license_key');
+        $formHardwareId  = $request->input('hardware_id');
+        $formLicenseKey  = is_string($formLicenseKey) ? trim($formLicenseKey) : $formLicenseKey;
+        $formHardwareId  = is_string($formHardwareId) ? trim($formHardwareId) : $formHardwareId;
+        $formLicenseKey  = $formLicenseKey === '' ? null : $formLicenseKey;
+        $formHardwareId  = $formHardwareId === '' ? null : $formHardwareId;
 
-        $user = User::create([
-            'name'        => $request->name,
-            'email'       => $request->email,
-            'password'    => Hash::make($request->password),
-            'created_by'  => $created_by,
-            'lang'        => $userLang,
-            'license_key'  => $licenseKey,
-            'hardware_id' => $hardwareId,
-        ]);
+        $userData = [
+            'name'       => $request->name,
+            'email'      => $request->email,
+            'password'   => Hash::make($request->password),
+            'created_by' => $created_by,
+            'lang'       => $userLang,
+        ];
 
-        if ($user && $request->roles) {
+        // إذا المنشئ شركة: نوظّف المستخدم كـ staff و نُورّث بيانات الخطة والـ license + slug
+        // هذا يضمن دخوله المباشر للوحة التحكم دون التوجيه لصفحة /plans
+        if ($isCompanyCreator) {
+            $userData['type']             = 'staff';
+            $userData['license_key']      = $formLicenseKey ?? $authUser->license_key;
+            $userData['license_id']       = $authUser->license_id;
+            $userData['hardware_id']      = $formHardwareId ?? $authUser->hardware_id;
+            $userData['plan_id']          = $authUser->plan_id;
+            $userData['plan_is_active']   = $authUser->plan_is_active;
+            $userData['plan_expire_date'] = $authUser->plan_expire_date;
+            $userData['is_trial']         = $authUser->is_trial;
+            $userData['trial_expire_date']= $authUser->trial_expire_date;
+            // بيانات إضافية تُورَّث من الشركة لسياق الموظف
+            $userData['company_name']     = $authUser->company_name;
+            $userData['slug']             = $authUser->slug;
+            $userData['country_id']       = $authUser->country_id;
+            $userData['api_environment']  = $authUser->api_environment;
+        } else {
+            // للسوبر ادمن: احترم القيم المُرسلة من الفورم إن وُجدت
+            $userData['license_key']      = $formLicenseKey;
+            $userData['hardware_id']      = $formHardwareId;
+        }
+        // ============================================================
+        // MODIFICATION v6 END
+        // ============================================================
+
+        $user = User::create($userData);
+
+        // ============================================================
+        // MODIFICATION: roles أصبح اختيارياً للشركة
+        // ============================================================
+        // إذا تم تمرير roles: نُعيّن الدور بشكل طبيعي (للسوبر ادمن أو إذا اختارت الشركة دوراً)
+        if ($user && $request->filled('roles')) {
             // Convert role names to IDs for syncing
             $role = Role::where('id', $request->roles)
                 ->where('created_by', $created_by)->first();
 
-            $user->roles()->sync([$role->id]);
-            $user->type = $role->name;
-            $user->save();
+            if ($role) {
+                $user->roles()->sync([$role->id]);
 
+                // للشركة: نظلّ نوع المستخدم staff حتى لو كان للدور اسم آخر
+                // للسوبر ادمن: نستخدم اسم الدور كنوع (السلوك الأصلي)
+                $user->type = $isCompanyCreator ? 'staff' : $role->name;
+                $user->save();
+
+                // Trigger email notification
+                if (isEmailTemplateEnabled('User Created', createdBy()) && !IsDemo()) {
+                    event(new \App\Events\UserCreated($user, $request->password));
+                }
+
+                // Check for email errors
+                if (session()->has('email_error')) {
+                    return redirect()->route('users.index')->with('warning', __('User created successfully, but welcome email failed: ') . session('email_error'));
+                }
+
+                return redirect()->route('users.index')->with('success', __('User created with roles'));
+            }
+        }
+        // إذا لم يتم تمرير roles والمنشئ شركة: نعتبر العملية ناجحة (موظف بدون دور)
+        elseif ($user && $isCompanyCreator) {
             // Trigger email notification
             if (isEmailTemplateEnabled('User Created', createdBy()) && !IsDemo()) {
                 event(new \App\Events\UserCreated($user, $request->password));
@@ -197,16 +259,30 @@ class UserController extends BaseController
 
             // Check for email errors
             if (session()->has('email_error')) {
-                return redirect()->route('users.index')->with('warning', __('User created successfully, but welcome email failed: ') . session('email_error'));
+                return redirect()->route('users.index')->with('warning', __('Staff user created successfully, but welcome email failed: ') . session('email_error'));
             }
 
-            return redirect()->route('users.index')->with('success', __('User created with roles'));
+            return redirect()->route('users.index')->with('success', __('Staff user created successfully. They can now login with their email and password.'));
         }
+        // ============================================================
+        // MODIFICATION END
+        // ============================================================
+
         return redirect()->back()->with('error', __('Unable to create User. Please try again!'));
     }
 
     /**
      * Update the specified resource in storage.
+     *
+     * ============================================================
+     * MODIFICATION v6: حفظ license_key + hardware_id عند التعديل
+     * ============================================================
+     * الإصلاحات:
+     *   1) حفظ license_key و hardware_id المرسلين من الفورم.
+     *   2) password اختياري عند التعديل: إن أُرسل وغير فارغ نُحدّثه،
+     *      وإن لم يُرسل نتركه كما هو (لا نُفرض required على الـ update).
+     *   3) لا نطلب roles إلزامياً: إن لم تُرسل نحتفظ بالأدوار الحالية.
+     *   4) type يبقى كما هو للشركة (staff) ولا يتأثر بتعديل اسم الدور.
      */
     public function update(UserRequest $request, User $user)
     {
@@ -215,20 +291,39 @@ class UserController extends BaseController
             $user->email = $request->email;
 
             // ============================================================
-            // LICENSE KEY + HARDWARE ID (v4 addition)
+            // MODIFICATION v6 START: حفظ license_key + hardware_id
             // ============================================================
-            // Same trim/normalize logic as in store(). Allows the admin
-            // to update or clear these fields later from the edit form.
-            $licenseKey  = $request->input('license_key');
+            $licenseKey = $request->input('license_key');
             $hardwareId = $request->input('hardware_id');
+            // trim + normalize empty → null
+            if (is_string($licenseKey)) {
+                $licenseKey = trim($licenseKey);
+                $licenseKey = $licenseKey === '' ? null : $licenseKey;
+            }
+            if (is_string($hardwareId)) {
+                $hardwareId = trim($hardwareId);
+                $hardwareId = $hardwareId === '' ? null : $hardwareId;
+            }
+            $user->license_key = $licenseKey;
+            $user->hardware_id = $hardwareId;
+            // ============================================================
+            // MODIFICATION v6 END
+            // ============================================================
 
-            $licenseKey  = is_string($licenseKey)  ? trim($licenseKey)  : $licenseKey;
-            $hardwareId = is_string($hardwareId) ? trim($hardwareId) : $hardwareId;
-            $user->license_key  = $licenseKey  !== '' ? $licenseKey  : null;
-            $user->hardware_id = $hardwareId !== '' ? $hardwareId : null;
+            // ============================================================
+            // MODIFICATION v6 START: تحديث الباسوورد اختيارياً
+            // ============================================================
+            // فقط إن أُرسل password وغير فارغ نُحدّثه
+            $newPassword = $request->input('password');
+            if (!empty($newPassword)) {
+                $user->password = Hash::make($newPassword);
+            }
+            // ============================================================
+            // MODIFICATION v6 END
+            // ============================================================
 
-            // find and syncing role
-            if ($request->roles) {
+            // find and syncing role (اختياري)
+            if ($request->filled('roles')) {
                 if (!in_array(auth()->user()->type, ['superadmin', 'company'])) {
                     $created_by = auth()->user()->created_by;
                 } else {
@@ -237,8 +332,13 @@ class UserController extends BaseController
                 $role = Role::where('id', $request->roles)
                     ->where('created_by', $created_by)->first();
 
-                $user->roles()->sync([$role->id]);
-                $user->type = $role->name;
+                if ($role) {
+                    $user->roles()->sync([$role->id]);
+                    // للشركة: نُبقي type كـ staff حتى لو تغيّر الدور
+                    // للسوبر ادمن: نستخدم اسم الدور كنوع
+                    $isCompanyCreator = auth()->user()->type === 'company';
+                    $user->type = $isCompanyCreator ? 'staff' : $role->name;
+                }
             }
 
             $user->save();
