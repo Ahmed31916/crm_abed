@@ -118,13 +118,15 @@ class UserController extends BaseController
      * Store a newly created resource in storage.
      *
      * ============================================================
-     * MODIFICATION v6: وراثة license_key + hardware_id + slug + plan من الشركة المالكة
+     * MODIFICATION v6: وراثة license_key + hardware_id + plan + slug فريد من الشركة المالكة
      * ============================================================
      * عندما ينشئ مستخدم من نوع "company" موظفاً جديداً:
      *   - يُفرض نوع المستخدم = 'staff'
-     *   - يرث license_key, license_id, hardware_id, slug, company_name,
+     *   - يرث license_key, license_id, hardware_id, company_name,
      *     plan_id, plan_is_active, plan_expire_date, is_trial, trial_expire_date
      *     من الشركة المالكة
+     *   - slug يُولّد بشكل فريد بتنسيق {company-slug}-staff[-{N}] لتفادي
+     *     التعارض مع قيد UNIQUE على users.slug (لا يُورَّث مباشرة)
      *   - يصبح roles اختيارياً (يمكن للشركة إنشاء موظف بدون دور)
      * هذا يضمن أن يستطيع الموظف تسجيل الدخول والدخول مباشرة للوحة
      * التحكم دون توجيهه لصفحة /plans، لأن middleware CheckPlanAccess
@@ -206,9 +208,18 @@ class UserController extends BaseController
             $userData['trial_expire_date']= $authUser->trial_expire_date;
             // بيانات إضافية تُورَّث من الشركة لسياق الموظف
             $userData['company_name']     = $authUser->company_name;
-            $userData['slug']             = $authUser->slug;
             $userData['country_id']       = $authUser->country_id;
             $userData['api_environment']  = $authUser->api_environment;
+            // ============================================================
+            // تنبيه هام حول slug:
+            // عمود users.slug عليه قيد UNIQUE في قاعدة البيانات، لذا لا
+            // يمكن وراثة slug الشركة مباشرةً للموظف (الموظف الثاني سيفشل
+            // بـ Duplicate entry). بدلاً من ذلك نُولّد slug فريد لكل موظف
+            // بتنسيق {company-slug}-staff[-{N}].
+            // هذا لا يؤثر على مسارات API مثل GET /api/{slug}/products لأن
+            // المتحكّم يبحث دائماً بـ where('type', 'company').
+            // ============================================================
+            $userData['slug'] = $this->generateUniqueStaffSlug($authUser->slug);
         } else {
             // للسوبر ادمن: احترم القيم المُرسلة من الفورم إن وُجدت
             $userData['license_key']      = $formLicenseKey;
@@ -269,6 +280,40 @@ class UserController extends BaseController
         // ============================================================
 
         return redirect()->back()->with('error', __('Unable to create User. Please try again!'));
+    }
+
+    /**
+     * توليد slug فريد لموظف جديد.
+     *
+     * عمود users.slug عليه قيد UNIQUE، لذا لا يمكن وراثة slug الشركة
+     * مباشرةً للموظف (الموظف الثاني سيرفض بـ Duplicate entry). هذه الدالة
+     * تُولّد slug فريد بتنسيق:
+     *   - {company-slug}-staff        (للموظف الأول)
+     *   - {company-slug}-staff-1      (للموظف الثاني)
+     *   - {company-slug}-staff-2      (للموظف الثالث)
+     *   ...
+     * وإن لم تكن الشركة تملك slug، نستخدم "staff" كقاعدة.
+     *
+     * @param  string|null  $companySlug  slug الشركة المالكة (قد يكون null)
+     * @return string                    slug فريد للموظف الجديد
+     */
+    private function generateUniqueStaffSlug(?string $companySlug): string
+    {
+        // تنظيف slug الشركة: trim + استبدال الفراغات بشرطة + lower
+        $cleaned = is_string($companySlug) ? trim($companySlug) : '';
+        $cleaned = $cleaned === '' ? '' : \Illuminate\Support\Str::slug($cleaned);
+
+        $base = $cleaned !== '' ? $cleaned . '-staff' : 'staff';
+        $slug = $base;
+        $counter = 1;
+
+        // حلقة تفادٍ للتعارض: نُزيد اللاحقة الرقمية حتى نجد slug غير مستخدم
+        while (User::where('slug', $slug)->exists()) {
+            $slug = $base . '-' . $counter;
+            $counter++;
+        }
+
+        return $slug;
     }
 
     /**
