@@ -210,9 +210,28 @@ export default function Users() {
                 }
             });
         } else if (formMode === 'edit') {
+            // ============================================================
+            // v6.2: فحص دفاعي لتفادي خطأ 404 عند التعديل
+            // ============================================================
+            // السبب الأكثر شيوعاً لخطأ 404 في وضع التعديل هو أن
+            // currentItem.id يكون undefined عند الإرسال. هذا يُنتج URL
+            // مثل /users/undefined ويحاول Laravel جلب User بـ
+            // findOrFail("undefined") فيفشل بـ 404.
+            // الحل: التحقق من وجود id قبل الإرسال + استخدام currentItem
+            // ككائن كامل مع route() (Ziggy يستخرج id تلقائياً).
+            // ============================================================
+            const userId = currentItem?.id;
+            if (!userId) {
+                console.error('[Users Edit] currentItem is missing id. currentItem =', currentItem);
+                toast.error(t('Cannot update user: missing user ID. Please close this dialog and try again, or refresh the page.'));
+                return;
+            }
+
+            console.log('[Users Edit] Updating user id =', userId, 'formData =', formData);
+
             toast.loading(t('Updating user...'));
 
-            router.put(route("users.update", currentItem.id), formData, {
+            router.put(route("users.update", { user: userId }), formData, {
                 onSuccess: (page) => {
                     setIsFormModalOpen(false);
                     toast.dismiss();
@@ -226,6 +245,7 @@ export default function Users() {
                 },
                 onError: (errors) => {
                     toast.dismiss();
+                    console.error('[Users Edit] Update failed for user', userId, 'errors =', errors);
                     if (typeof errors === 'string') {
                         toast.error(errors);
                     } else {
