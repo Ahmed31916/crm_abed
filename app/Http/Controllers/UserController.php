@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 
 class UserController extends BaseController
@@ -328,9 +329,25 @@ class UserController extends BaseController
      *      وإن لم يُرسل نتركه كما هو (لا نُفرض required على الـ update).
      *   3) لا نطلب roles إلزامياً: إن لم تُرسل نحتفظ بالأدوار الحالية.
      *   4) type يبقى كما هو للشركة (staff) ولا يتأثر بتعديل اسم الدور.
+     *
+     * v6.4: تم استبدال route model binding (User $user) بمعامل $id صريح
+     *       + User::findOrFail($id). هذا يتجنب فشل الـ binding عند وجود:
+     *       - getRouteKeyName() مخصص في نموذج User (مثل 'slug').
+     *       - global scope يُصفّي المستخدمين.
+     *       - policy تُعيد denyAsNotFound.
+     *       كذلك أضفنا Log::info لتتبع وصول الطلب للمتحكّم عند التشخيص.
      */
-    public function update(UserRequest $request, User $user)
+    public function update(UserRequest $request, $id)
     {
+        // v6.4: سجل تشخيصي لتأكيد وصول الطلب للمتحكّم
+        Log::info('[Users] update() reached', [
+            'id'         => $id,
+            'auth_id'    => Auth::id(),
+            'request_ip' => $request->ip(),
+        ]);
+
+        $user = User::findOrFail($id);
+
         if ($user) {
             $user->name  = $request->name;
             $user->email = $request->email;
@@ -394,9 +411,16 @@ class UserController extends BaseController
 
     /**
      * Remove the specified resource from storage.
+     *
+     * v6.4: استبدال route model binding بـ $id + findOrFail لتجنّب 404
+     *       الناتج عن فشل الـ binding (مثلاً إذا كان getRouteKeyName يُعيد 'slug').
      */
-    public function destroy(User $user)
+    public function destroy($id)
     {
+        Log::info('[Users] destroy() reached', ['id' => $id, 'auth_id' => Auth::id()]);
+
+        $user = User::findOrFail($id);
+
         if ($user) {
             $user->delete();
             return redirect()->route('users.index')->with('success', __('User deleted with roles'));
@@ -406,13 +430,18 @@ class UserController extends BaseController
 
     /**
      * Reset user password
+     *
+     * v6.4: استبدال route model binding بـ $id + findOrFail.
      */
-    public function resetPassword(Request $request, User $user)
+    public function resetPassword(Request $request, $id)
     {
+        Log::info('[Users] resetPassword() reached', ['id' => $id, 'auth_id' => Auth::id()]);
+
         $request->validate([
             'password' => 'required|min:8|confirmed',
         ]);
 
+        $user = User::findOrFail($id);
         $user->password = Hash::make($request->password);
         $user->save();
 
@@ -421,9 +450,13 @@ class UserController extends BaseController
 
     /**
      * Display the specified resource.
+     *
+     * v6.4: استبدال route model binding بـ $id + findOrFail.
      */
-    public function show(User $user)
+    public function show($id)
     {
+        $user = User::findOrFail($id);
+
         // Get meetings where user is an attendee
         $meetings = \App\Models\Meeting::where('created_by', createdBy())
             ->whereHas('attendees', function ($q) use ($user) {
@@ -442,9 +475,15 @@ class UserController extends BaseController
 
     /**
      * Toggle user status
+     *
+     * v6.4: استبدال route model binding بـ $id + findOrFail.
+     *       كذلك أضفنا Log::info لتتبع وصول الطلب (مفيد لتشخيص "لا يتعدّل الحالة").
      */
-    public function toggleStatus(User $user)
+    public function toggleStatus($id)
     {
+        Log::info('[Users] toggleStatus() reached', ['id' => $id, 'auth_id' => Auth::id()]);
+
+        $user = User::findOrFail($id);
         $user->status = $user->status === 'active' ? 'inactive' : 'active';
         $user->save();
 
@@ -506,8 +545,10 @@ class UserController extends BaseController
     /**
      * Update the product limit for a specific company user.
      * Only super admin can update product limits.
+     *
+     * v6.4: استبدال route model binding بـ $id + findOrFail.
      */
-    public function updateProductLimit(Request $request, User $user)
+    public function updateProductLimit(Request $request, $id)
     {
         if (!auth()->user()->isSuperAdmin()) {
             abort(403, 'Unauthorized Access Prevented');
@@ -517,6 +558,7 @@ class UserController extends BaseController
             'product_limit' => 'required|integer|min:1',
         ]);
 
+        $user = User::findOrFail($id);
         $user->update([
             'product_limit' => $request->product_limit,
         ]);

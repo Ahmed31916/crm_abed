@@ -160,18 +160,14 @@ export default function Users() {
         // ============================================================
 
         // ============================================================
-        // MODIFICATION v6: تنظيف الحقول الفارغة في وضع التعديل
+        // MODIFICATION v6.4: تنظيف الحقول في وضع التعديل
         // ============================================================
-        // في وضع التعديل: لا نُرسل الباسوورد إن كان فارغاً
-        // حتى لا يُعتبر تعديلاً للباسوورد ويحاول المتحكم تحديثه.
-        // المتحكل يتحقق: إن لم يُرسل password، يحتفظ بالباسوورد الحالي.
+        // password و password_confirmation لم يعودا جزءاً من فورم التعديل،
+        // لكن نُ_cleanهما دفاعياً إن تسلّلا إلى formData لأي سبب.
+        // المتحكّل يتجاهلهما في update (لا يحاول تحديث الباسوورد).
         if (formMode === 'edit') {
-            if (!formData.password || formData.password === '') {
-                delete formData.password;
-            }
-            if (!formData.password_confirmation || formData.password_confirmation === '') {
-                delete formData.password_confirmation;
-            }
+            delete formData.password;
+            delete formData.password_confirmation;
         }
 
         // trim + normalize empty → undefined لـ license_key و hardware_id
@@ -457,50 +453,55 @@ export default function Users() {
     ];
 
     // ============================================================
-    // MODIFICATION v6.1: بناء حقول المودال — كل الحقول تظهر في create + edit
+    // MODIFICATION v6.4: بناء حقول المودال — password و password_confirmation
+    // يظهران في create فقط. في edit لا يُعرضان إطلاقاً (يوجد فورم منفصل
+    // لإعادة تعيين الباسوورد عبر زر "Reset Password").
     // ============================================================
-    // - password و password_confirmation: تظهران في create و edit معاً.
-    //   إلزامية في create، اختيارية في edit (مع placeholder "Leave blank to
-    //   keep current password"). إن تركهما فارغين في edit يحافظ على الباسوورد
-    //   الحالي (المتحكّل يتحقق: إن لم يُرسل password، لا يُحدّثه).
+    // - password و password_confirmation: create فقط، إلزامية.
     // - license_key و hardware_id: تظهر دائماً (create + edit) واختيارية.
     //   للشركة: placeholder يشير إلى أن الترك فارغاً يُورّث القيمة من الشركة.
     // - roles: تظهر للجميع (create + edit)، إلزامية للسوبر ادمن في create،
     //   اختيارية للشركة وفي وضع التعديل للجميع. للشركة، إن اختار دوراً يُسند،
     //   وإن لم يختر يُنشأ الموظف بدون دور (staff بدون role).
     //
-    // ملاحظة عن إصلاح خطأ التعديل: في الإصدار السابق، حقل password كان
-    // يحمل required: true بشكل ثابت. CrudFormModal كان يُحقّق من required
-    // في كل الحالات، فكان يُظهر خطأ "The password field is required"
-    // عند محاولة التعديل. الحل: ربط required بـ formMode فعلياً (isCreate)
-    // بدلاً من تركه true.
+    // ملاحظة تاريخية: في الإصدار السابق كان حقل password يُعرض في edit
+    // أيضاً (مع placeholder "Leave blank to keep current password"). أما الآن
+    // فالتعديل لا يُغيّر الباسوورد إطلاقاً — استخدم زر Reset Password المنفصل.
     const buildFormFields = () => {
         const isCreate = formMode === 'create';
 
         const fields: any[] = [
             { name: 'name', label: t('Name'), type: 'text', required: true },
             { name: 'email', label: t('Email'), type: 'email', required: true },
-            // ============================================================
-            // password + password_confirmation: ظاهران في create + edit
-            // (لا conditional) — required فقط في create، اختياري في edit
-            // ============================================================
-            {
-                name: 'password',
-                label: t('Password'),
-                type: 'password',
-                required: isCreate,
-                placeholder: isCreate ? undefined : t('Leave blank to keep current password')
-            },
-            {
-                name: 'password_confirmation',
-                label: t('Confirm Password'),
-                type: 'password',
-                required: isCreate,
-                placeholder: isCreate ? undefined : t('Leave blank to keep current password')
-            },
-            // ============================================================
-            // v6: حقول license_key + hardware_id — تظهر دائماً (create + edit)
-            // ============================================================
+        ];
+
+        // ============================================================
+        // v6.4: password + password_confirmation — create فقط
+        // ============================================================
+        // لا نُضيفهما في edit لأن هناك زراً منفصلاً (Reset Password) يفتح
+        // مودالاً خاصاً لإعادة التعيين. إبقاؤهما في edit كان مكرراً ومربكاً.
+        if (isCreate) {
+            fields.push(
+                {
+                    name: 'password',
+                    label: t('Password'),
+                    type: 'password',
+                    required: true
+                },
+                {
+                    name: 'password_confirmation',
+                    label: t('Confirm Password'),
+                    type: 'password',
+                    required: true
+                }
+            );
+        }
+        // ============================================================
+
+        // ============================================================
+        // v6: حقول license_key + hardware_id — تظهر دائماً (create + edit)
+        // ============================================================
+        fields.push(
             {
                 name: 'license_key',
                 label: t('License Key'),
@@ -518,9 +519,9 @@ export default function Users() {
                 placeholder: isCompany
                     ? t('Leave blank to inherit from company')
                     : t('Enter hardware ID')
-            },
-            // ============================================================
-        ];
+            }
+        );
+        // ============================================================
 
         // ============================================================
         // v6.1: حقل roles يظهر للجميع (create + edit)
@@ -819,9 +820,10 @@ export default function Users() {
                     // نضمن هنا أن القيم نصية (string | '') كي يفهمها الحقل text.
                     license_key: currentItem.license_key || '',
                     hardware_id: currentItem.hardware_id || '',
-                    // في وضع التعديل: لا نُمرّر password حتى لا يظهر كـ autocomplete
-                    password: '',
-                    password_confirmation: ''
+                    // ============================================================
+                    // v6.4: لا نُمرّر password/password_confirmation في initialData
+                    // لأن الحقلين لم يعودا يظهران في فورم التعديل (يوجد زر منفصل
+                    // لإعادة التعيين). تركهما فارغين كان يسبب عرض autofill من المتصفح.
                     // ============================================================
                 } : null}
                 title={
