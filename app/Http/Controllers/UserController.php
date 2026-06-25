@@ -339,13 +339,7 @@ class UserController extends BaseController
      */
     public function update(UserRequest $request, $id)
     {
-        // v6.4: سجل تشخيصي لتأكيد وصول الطلب للمتحكّم
-        Log::info('[Users] update() reached', [
-            'id'         => $id,
-            'auth_id'    => Auth::id(),
-            'request_ip' => $request->ip(),
-        ]);
-
+ 
         $user = User::findOrFail($id);
 
         if ($user) {

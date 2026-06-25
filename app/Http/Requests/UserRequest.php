@@ -66,7 +66,7 @@ class UserRequest extends FormRequest
 
         // قاعدة الإيميل: unique تتجاهل المستخدم الحالي عند التعديل
         $emailRule = $isUpdate
-            ? 'required|string|lowercase|email|max:255|unique:users,email,' . $this->route('user')->id
+            ? 'required|string|lowercase|email|max:255|unique:users,email,' . $this->route('user')
             : 'required|string|lowercase|email|max:255|unique:users,email';
 
         return [
