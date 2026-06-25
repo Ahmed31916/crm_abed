@@ -437,31 +437,38 @@ export default function Users() {
     ];
 
     // ============================================================
-    // MODIFICATION v6: بناء حقول المودال ديناميكياً حسب نوع المستخدم + وضع المودال
+    // MODIFICATION v6.1: بناء حقول المودال — كل الحقول تظهر في create + edit
     // ============================================================
-    // - password و password_confirmation: إلزامية في create، اختيارية في edit
-    //   مع placeholder "Leave blank to keep current password" في وضع التعديل.
+    // - password و password_confirmation: تظهران في create و edit معاً.
+    //   إلزامية في create، اختيارية في edit (مع placeholder "Leave blank to
+    //   keep current password"). إن تركهما فارغين في edit يحافظ على الباسوورد
+    //   الحالي (المتحكّل يتحقق: إن لم يُرسل password، لا يُحدّثه).
     // - license_key و hardware_id: تظهر دائماً (create + edit) واختيارية.
     //   للشركة: placeholder يشير إلى أن الترك فارغاً يُورّث القيمة من الشركة.
-    // - roles: يظهر فقط لغير الشركة، اختياري في edit.
+    // - roles: تظهر للجميع (create + edit)، إلزامية للسوبر ادمن في create،
+    //   اختيارية للشركة وفي وضع التعديل للجميع. للشركة، إن اختار دوراً يُسند،
+    //   وإن لم يختر يُنشأ الموظف بدون دور (staff بدون role).
     //
     // ملاحظة عن إصلاح خطأ التعديل: في الإصدار السابق، حقل password كان
-    // يحمل required: true بشكل ثابت + conditional لإخفائه في edit. لكن
-    // CrudFormModal كان يُحقّق من required حتى لو كان الحقل مخفياً، فكان
-    // يظهر خطأ "The password field is required" عند محاولة التعديل.
-    // الحل: ربط required بـ formMode فعلياً (isCreate) بدلاً من تركه true.
+    // يحمل required: true بشكل ثابت. CrudFormModal كان يُحقّق من required
+    // في كل الحالات، فكان يُظهر خطأ "The password field is required"
+    // عند محاولة التعديل. الحل: ربط required بـ formMode فعلياً (isCreate)
+    // بدلاً من تركه true.
     const buildFormFields = () => {
         const isCreate = formMode === 'create';
 
         const fields: any[] = [
             { name: 'name', label: t('Name'), type: 'text', required: true },
             { name: 'email', label: t('Email'), type: 'email', required: true },
+            // ============================================================
+            // password + password_confirmation: ظاهران في create + edit
+            // (لا conditional) — required فقط في create، اختياري في edit
+            // ============================================================
             {
                 name: 'password',
                 label: t('Password'),
                 type: 'password',
                 required: isCreate,
-                conditional: (mode: string) => mode === 'create',
                 placeholder: isCreate ? undefined : t('Leave blank to keep current password')
             },
             {
@@ -469,7 +476,6 @@ export default function Users() {
                 label: t('Confirm Password'),
                 type: 'password',
                 required: isCreate,
-                conditional: (mode: string) => mode === 'create',
                 placeholder: isCreate ? undefined : t('Leave blank to keep current password')
             },
             // ============================================================
@@ -496,25 +502,29 @@ export default function Users() {
             // ============================================================
         ];
 
-        // حقل roles يظهر فقط لغير الشركة (السوبر ادمن أو الأدمن)
-        // الشركة لا تحتاج لاختيار دور - الموظف يُنشأ كـ staff تلقائياً
-        // v6: roles أصبح اختيارياً في edit (لا نُجبر المستخدم على تغيير الدور)
-        if (!isCompany) {
-            fields.push({
-                name: 'roles',
-                label: t('Role'),
-                type: 'select',
-                options: roles ? roles.map((role: any) => ({
-                    value: role.id.toString(),
-                    label: role.label || role.name
-                })) : [],
-                required: isCreate, // مطلوب فقط عند الإنشاء، اختياري عند التعديل
-                emptyNote: !roles || roles.length === 0 ? {
-                    link: route('roles.index'),
-                    linkText: t('Roles')
-                } : undefined
-            });
-        }
+        // ============================================================
+        // v6.1: حقل roles يظهر للجميع (create + edit)
+        // ============================================================
+        // - للسوبر ادمن في create: required (إلزامي)
+        // - للسوبر ادمن في edit: optional (لا نُجبره على تغيير الدور)
+        // - للشركة في create: optional (يُنشأ staff بدون دور إن لم يُختر)
+        // - للشركة في edit: optional
+        // - إن لم توجد أي roles للشركة، يظهر emptyNote يربط لصفحة إنشاء الأدوار
+        // ============================================================
+        fields.push({
+            name: 'roles',
+            label: t('Role'),
+            type: 'select',
+            options: roles ? roles.map((role: any) => ({
+                value: role.id.toString(),
+                label: role.label || role.name
+            })) : [],
+            required: !isCompany && isCreate, // إلزامي فقط للسوبر ادمن في create
+            emptyNote: !roles || roles.length === 0 ? {
+                link: route('roles.index'),
+                linkText: t('Roles')
+            } : undefined
+        });
 
         return fields;
     };
