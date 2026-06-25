@@ -59,9 +59,6 @@ class LicenseKeyService
 
     /**
      * Generate a license key for a user and plan using the Vital.Manager API.
-     *
-     * POST /api/licenses/create
-     * Authentication: RemoteManagementApiKey header only
      */
     public function generateLicenseKey(User $user, int $planId, string $billingCycle = 'monthly'): array
     {
@@ -233,9 +230,6 @@ class LicenseKeyService
 
     /**
      * Activate a license on the Vital.Manager API.
-     *
-     * POST /api/licenses/activate
-     * Authentication: RemoteManagementApiKey header only
      */
     public function activateLicense(string $hardwareId, string $licenseKey): array
     {
@@ -302,9 +296,6 @@ class LicenseKeyService
 
     /**
      * Validate a license key against the Vital.Manager API.
-     *
-     * POST /api/licenses/validate (multipart/form-data)
-     * Authentication: RemoteManagementApiKey header only
      */
     public function validateLicenseKey(string $licenseKey, ?string $hardwareId = null): array
     {
@@ -365,9 +356,6 @@ class LicenseKeyService
 
     /**
      * Submit a trial license request via the Vital.Manager API.
-     *
-     * POST /api/trial-requests
-     * Authentication: RemoteManagementApiKey header only
      */
     public function submitTrialRequest(User $user): array
     {
@@ -424,6 +412,163 @@ class LicenseKeyService
             return [
                 'success' => false,
                 'message' => __('Unable to submit trial request'),
+            ];
+        }
+    }
+
+    // ====================================================================
+    // ===== SIMPLIFIED METHOD: validateAndImportLicense ==================
+    // ====================================================================
+    // تتحقق من الـ license key عبر Vital.Manager API وتُرجع معلومات الـ
+    // license فقط. لا تقوم بتحديث أي سجل مستخدم - المتحكم هو من يقرر
+    // كيف يستخدم هذه المعلومات عند بناء userData قبل User::create().
+    //
+    // السيناريو: مستخدم قديم على تطبيق الديسكتوب، لديه hardware_id
+    // و license_key يعملان. يأتي لتسجيل حساب في الويب. نتحقق من
+    // الـ license عبر API، وإذا كان صالحاً نُرجع معلوماته (license_id،
+    // expiration_date، ...) فيستخدمها المتحكم لإنشاء المستخدم ببيانات
+    // خطة فعّالة فيُحوَّل مباشرة للداشبورد بدلاً من /plans.
+    // ====================================================================
+
+    /**
+     * Validate a license key via the Vital.Manager API and return its info.
+     *
+     * This method does NOT update any user record. It only validates and
+     * returns the license information so the caller (controller) can use
+     * it to populate the user record before User::create().
+     *
+     * @param  string      $licenseKey  The license key to validate
+     * @param  string|null $hardwareId  Optional hardware id (for activation check)
+     * @return array {
+     *     success: bool,                // هل التحقق نجح overall
+     *     source: 'api'|'database'|'none',
+     *     license_id: string|null,      // UUID of the license (from API)
+     *     expiration_date: string|null, // ISO date string from API
+     *     is_trial: bool,               // هل الـ license من نوع Trial
+     *     trial_expire_date: string|null,
+     *     is_valid: bool,               // هل الـ license صالح وغير منتهي
+     *     message: string,              // رسالة للمستخدم
+     *     data: array                   // الـ response الأصلي من API
+     * }
+     */
+    public function validateAndImportLicense(string $licenseKey, ?string $hardwareId = null): array
+    {
+        try {
+            // 1) Basic sanity check
+            if (empty($licenseKey)) {
+                return [
+                    'success'           => false,
+                    'source'            => 'none',
+                    'license_id'        => null,
+                    'expiration_date'   => null,
+                    'is_trial'          => false,
+                    'trial_expire_date' => null,
+                    'is_valid'          => false,
+                    'message'           => __('License key is required.'),
+                    'data'              => [],
+                ];
+            }
+
+            // 2) Validate via API (or fall back to local DB lookup)
+            $validation = $this->validateLicenseKey($licenseKey, $hardwareId);
+
+            // 3) If API explicitly returned invalid → abort
+            if (isset($validation['valid']) && $validation['valid'] === false) {
+                Log::warning('LicenseKeyService@validateAndImportLicense: validation failed', [
+                    'license_key' => $licenseKey,
+                    'validation'  => $validation,
+                ]);
+
+                return [
+                    'success'           => false,
+                    'source'            => empty($this->apiUrl) ? 'database' : 'api',
+                    'license_id'        => null,
+                    'expiration_date'   => null,
+                    'is_trial'          => false,
+                    'trial_expire_date' => null,
+                    'is_valid'          => false,
+                    'message'           => $validation['message'] ?? __('License key is invalid or expired.'),
+                    'data'              => $validation,
+                ];
+            }
+
+            // 4) Extract information from the API response
+            $licenseId = $validation['licenseId']
+                ?? $validation['license_id']
+                ?? $validation['id']
+                ?? null;
+
+            $expirationRaw = $validation['expirationDate']
+                ?? $validation['expiration_date']
+                ?? $validation['expiresAt']
+                ?? null;
+
+            $isTrial = isset($validation['licenseType'])
+                ? ($validation['licenseType'] === 'Trial')
+                : false;
+
+            $trialExpireRaw = $validation['trialExpireDate']
+                ?? $validation['trial_expire_date']
+                ?? null;
+
+            // 5) Determine if the license is currently valid (not expired)
+            $isValid = true;
+            if ($expirationRaw) {
+                try {
+                    $expirationDate = \Illuminate\Support\Carbon::parse($expirationRaw);
+                    if ($expirationDate->isPast()) {
+                        $isValid = false;
+                    }
+                } catch (\Exception $e) {
+                    Log::warning('LicenseKeyService@validateAndImportLicense: could not parse expiration date', [
+                        'raw'   => $expirationRaw,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            // 6) Optionally activate the license on the hardware (don't block on failure)
+            if (!empty($hardwareId) && !empty($this->apiUrl)) {
+                $this->activateLicense($hardwareId, $licenseKey);
+            }
+
+            Log::info('LicenseKeyService@validateAndImportLicense: license validated', [
+                'license_key'   => $licenseKey,
+                'license_id'    => $licenseId,
+                'expiration'    => $expirationRaw,
+                'is_trial'      => $isTrial,
+                'is_valid'      => $isValid,
+            ]);
+
+            return [
+                'success'           => true,
+                'source'            => empty($this->apiUrl) ? 'database' : 'api',
+                'license_id'        => $licenseId,
+                'expiration_date'   => $expirationRaw,
+                'is_trial'          => $isTrial,
+                'trial_expire_date' => $trialExpireRaw,
+                'is_valid'          => $isValid,
+                'message'           => __('License key validated successfully.'),
+                'data'              => $validation,
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('LicenseKeyService@validateAndImportLicense: exception', [
+                'license_key' => $licenseKey,
+                'error'       => $e->getMessage(),
+                'trace'       => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success'           => false,
+                'source'            => 'none',
+                'license_id'        => null,
+                'expiration_date'   => null,
+                'is_trial'          => false,
+                'trial_expire_date' => null,
+                'is_valid'          => false,
+                'message'           => __('Failed to validate license: :error', ['error' => $e->getMessage()]),
+                'data'              => [],
             ];
         }
     }

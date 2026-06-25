@@ -155,7 +155,7 @@ export default function ProductEdit() {
         requiredFields.forEach(({ name, label }) => {
             const value = data[name];
             // Skip locked fields from validation (they're read-only)
-            if (isLocked && ['name', 'product_sku', 'product_form', 'bottle_size', 'price', 'main_image_id'].includes(name)) {
+            if (isLocked && ['name', 'product_sku', 'product_form', 'bottle_size', 'price', 'main_image_id', 'category_id'].includes(name)) {
                 return;
             }
             if (!value || (Array.isArray(value) && value.length === 0)) {
@@ -280,25 +280,33 @@ export default function ProductEdit() {
 
                                 {/* Category + SKU */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {/* Category - always editable */}
-                                    <div className="space-y-2">
-                                        <Label className="text-sm font-medium" required>
-                                            {t('Category')}
-                                        </Label>
-                                        <Select value={data.category_id} onValueChange={(value) => handleInputChange('category_id', value)}>
-                                            <SelectTrigger className={errors.category_id ? 'border-red-500' : ''}>
-                                                <SelectValue placeholder={t('Select Category')} />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {categories?.map((category: any) => (
-                                                    <SelectItem key={category.id} value={category.id.toString()}>
-                                                        {category.name}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        {errors.category_id && <p className="text-xs text-red-500">{errors.category_id}</p>}
-                                    </div>
+                                    {/* Category: read-only LockedField when editing a Super Admin product (company cannot change it); dropdown otherwise */}
+                                    {isLocked ? (
+                                        <LockedField
+                                            label={t('Category')}
+                                            value={product.category?.name || '—'}
+                                            hint={t('Category is set by Super Admin and cannot be changed')}
+                                        />
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <Label className="text-sm font-medium" required>
+                                                {t('Category')}
+                                            </Label>
+                                            <Select value={data.category_id} onValueChange={(value) => handleInputChange('category_id', value)}>
+                                                <SelectTrigger className={errors.category_id ? 'border-red-500' : ''}>
+                                                    <SelectValue placeholder={t('Select Category')} />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {categories?.map((category: any) => (
+                                                        <SelectItem key={category.id} value={category.id.toString()}>
+                                                            {category.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            {errors.category_id && <p className="text-xs text-red-500">{errors.category_id}</p>}
+                                        </div>
+                                    )}
 
                                     {/* SKU - always read-only after creation */}
                                     <LockedField

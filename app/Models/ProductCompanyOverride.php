@@ -46,12 +46,13 @@ class ProductCompanyOverride extends Model
     ];
 
     protected $casts = [
-        'price_override' => 'decimal:2',
-        'sale_price_override' => 'decimal:2',
-        'is_visible' => 'boolean',
-        'custom_primary_indications' => 'array',
-        'primary_indications' => 'array',
-        'dosing_na' => 'boolean',
+        'is_visible'                  => 'boolean',
+        'price_override'              => 'decimal:2',
+        'sale_price_override'         => 'decimal:2',
+        'stock_quantity_override'     => 'integer',
+        'dosing_na'                   => 'boolean',
+        'primary_indications'         => 'array',
+        'custom_primary_indications'  => 'array',
     ];
 
     // =========================================================================
