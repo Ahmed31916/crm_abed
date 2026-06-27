@@ -152,7 +152,7 @@ class ProcessProductEvent implements ShouldQueue
                 config('services.rabbitmq.port', env('RABBITMQ_PORT', 5672)),
                 config('services.rabbitmq.user', env('RABBITMQ_USER', 'ahmed_admin')),
                 config('services.rabbitmq.password', env('RABBITMQ_PASS', 'P@ssword123')),
-                config('services.rabbitmq.vhost', env('RABBITMQ_VHOST', '/')),
+                config('services.rabbitmq.vhost', env('RABBITMQ_VHOST', 'test')),
                 false,       // insist
                 'AMQPLAIN',  // login_method
                 null,        // login_response
