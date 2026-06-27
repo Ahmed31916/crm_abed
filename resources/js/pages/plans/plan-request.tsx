@@ -11,6 +11,21 @@ import { SearchAndFilterBar } from '@/components/ui/search-and-filter-bar';
 import { CheckCircle, XCircle } from 'lucide-react';
 import { capitalize, getDisplayUrl } from '@/utils/helper';
 
+/**
+ * صورة افتراضية مضمّنة كـ data URI (SVG) — لا تتطلب طلب شبكة
+ * ولا تُسبّب أي خطأ CORS أو loopback. تُستخدم عند فشل fallback
+ * الـ avatar مرتين متتاليتين لكسر حلقة onError اللانهائية.
+ */
+const AVATAR_FALLBACK_DATA_URI =
+    'data:image/svg+xml;utf8,' +
+    encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">' +
+        '<rect width="40" height="40" fill="#e5e7eb"/>' +
+        '<circle cx="20" cy="15" r="6" fill="#9ca3af"/>' +
+        '<path d="M8 34c0-6 5-10 12-10s12 4 12 10" fill="#9ca3af"/>' +
+        '</svg>'
+    );
+
 export default function PlanRequestsPage() {
     const { t } = useTranslation();
     const { planRequests, filters: pageFilters = {}, auth, globalSettings } = usePage().props as any;
@@ -149,6 +164,16 @@ export default function PlanRequestsPage() {
                             className="h-10 w-10 rounded-full object-cover"
                             onError={(e) => {
                                 const target = e.target as HTMLImageElement;
+
+                                // إن سبق وعيّننا fallback من قبل → نستخدم data URI ثابت
+                                // لكسر الحلقة اللانهائية فوراً.
+                                if (target.dataset.fallbackApplied === 'true') {
+                                    target.src = AVATAR_FALLBACK_DATA_URI;
+                                    return;
+                                }
+
+                                // أول فشل: نحاول مرة واحدة بالـ avatar الافتراضي ونوسم العنصر
+                                target.dataset.fallbackApplied = 'true';
                                 target.src = getDisplayUrl('media/avatars/avatar.png');
                             }}
                         />
