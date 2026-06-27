@@ -176,8 +176,8 @@ class ProcessProductEvent implements ShouldQueue
             ]);
 
             Log::info([
-    'host'  => config('services.rabbitmq.host'),
-    'vhost' => config('services.rabbitmq.vhost'),
+    'host'  => config('services.rabbitmq.host', env('RABBITMQ_HOST', 'vitalexperts.co')),
+    'vhost' => config('services.rabbitmq.vhost', env('RABBITMQ_VHOST', 'test')),
 ]);
 
             $channel->basic_publish($msg, $exchangeName);
