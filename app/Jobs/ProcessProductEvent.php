@@ -98,11 +98,6 @@ class ProcessProductEvent implements ShouldQueue
                 'payload'    => $outbox->payload,
             ]);
 
-                    // في handle() قبل سطر الاتصال بـ RabbitMQ
-Log::info("DEBUG VHOST", [
-    'vhost' => config('services.rabbitmq.vhost'),
-    'env'   => env('RABBITMQ_VHOST'),
-]);
             $this->publishToRabbitMQ($outbox->payload);
 
             // 6. تحديث الحالة إلى "تم الإرسال"
