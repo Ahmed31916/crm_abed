@@ -175,6 +175,11 @@ class ProcessProductEvent implements ShouldQueue
                 'message_id'    => uniqid('product_', true), // معرف فريد للرسالة
             ]);
 
+            Log::info([
+    'host'  => config('services.rabbitmq.host'),
+    'vhost' => config('services.rabbitmq.vhost'),
+]);
+
             $channel->basic_publish($msg, $exchangeName);
 
         } finally {
