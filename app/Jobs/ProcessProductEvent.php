@@ -98,6 +98,15 @@ class ProcessProductEvent implements ShouldQueue
                 'payload'    => $outbox->payload,
             ]);
 
+
+        Log::info('RabbitMQ Connection Config', [
+    'host' => config('services.rabbitmq.host'),
+    'port' => config('services.rabbitmq.port'),
+    'user' => config('services.rabbitmq.user'),
+    'vhost_config' => config('services.rabbitmq.vhost'),
+    'vhost_env' => env('RABBITMQ_VHOST'),
+]);
+
             $this->publishToRabbitMQ($outbox->payload);
 
             // 6. تحديث الحالة إلى "تم الإرسال"
@@ -146,15 +155,6 @@ class ProcessProductEvent implements ShouldQueue
         $channel = null;
 
         try {
-
-        Log::info('RabbitMQ Connection Config', [
-    'host' => config('services.rabbitmq.host'),
-    'port' => config('services.rabbitmq.port'),
-    'user' => config('services.rabbitmq.user'),
-    'vhost_config' => config('services.rabbitmq.vhost'),
-    'vhost_env' => env('RABBITMQ_VHOST'),
-]);
-
             // إنشاء اتصال RabbitMQ
             $connection = new AMQPStreamConnection(
                 config('services.rabbitmq.host', env('RABBITMQ_HOST', 'vitalexperts.co')),
