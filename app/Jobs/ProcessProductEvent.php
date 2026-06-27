@@ -146,13 +146,22 @@ class ProcessProductEvent implements ShouldQueue
         $channel = null;
 
         try {
+
+        Log::info('RabbitMQ Connection Config', [
+    'host' => config('services.rabbitmq.host'),
+    'port' => config('services.rabbitmq.port'),
+    'user' => config('services.rabbitmq.user'),
+    'vhost_config' => config('services.rabbitmq.vhost'),
+    'vhost_env' => env('RABBITMQ_VHOST'),
+]);
+
             // إنشاء اتصال RabbitMQ
             $connection = new AMQPStreamConnection(
                 config('services.rabbitmq.host', env('RABBITMQ_HOST', 'vitalexperts.co')),
                 config('services.rabbitmq.port', env('RABBITMQ_PORT', 5672)),
                 config('services.rabbitmq.user', env('RABBITMQ_USER', 'ahmed_admin')),
                 config('services.rabbitmq.password', env('RABBITMQ_PASS', 'P@ssword123')),
-                config('services.rabbitmq.vhost', env('RABBITMQ_VHOST', 'test')),
+                config('services.rabbitmq.vhost', env('RABBITMQ_VHOST', '/')),
                 false,       // insist
                 'AMQPLAIN',  // login_method
                 null,        // login_response
@@ -174,11 +183,6 @@ class ProcessProductEvent implements ShouldQueue
                 'content_type'  => 'application/json',
                 'message_id'    => uniqid('product_', true), // معرف فريد للرسالة
             ]);
-
-            Log::info([
-    'host'  => config('services.rabbitmq.host', env('RABBITMQ_HOST', 'vitalexperts.co')),
-    'vhost' => config('services.rabbitmq.vhost', env('RABBITMQ_VHOST', 'test')),
-]);
 
             $channel->basic_publish($msg, $exchangeName);
 
