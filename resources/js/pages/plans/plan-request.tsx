@@ -1,5 +1,6 @@
 // pages/plans/plan-request.tsx
-import { useState } from 'react';
+// v6.8 — إضافات: زر View Details + زر Change Plan + إصلاحات v6.7 (Actions/Pagination/Per Page)
+import { useState, useEffect } from 'react';
 import { PageTemplate } from '@/components/page-template';
 import { usePage, router } from '@inertiajs/react';
 import { Button } from '@/components/ui/button';
@@ -8,13 +9,27 @@ import { toast } from '@/components/custom-toast';
 import { useTranslation } from 'react-i18next';
 import { Pagination } from '@/components/ui/pagination';
 import { SearchAndFilterBar } from '@/components/ui/search-and-filter-bar';
-import { CheckCircle, XCircle } from 'lucide-react';
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import { capitalize, getDisplayUrl } from '@/utils/helper';
 
 /**
  * صورة افتراضية مضمّنة كـ data URI (SVG) — لا تتطلب طلب شبكة
- * ولا تُسبّب أي خطأ CORS أو loopback. تُستخدم عند فشل fallback
- * الـ avatar مرتين متتاليتين لكسر حلقة onError اللانهائية.
+ * ولا تُسبّب أي خطأ CORS أو loopback.
  */
 const AVATAR_FALLBACK_DATA_URI =
     'data:image/svg+xml;utf8,' +
@@ -26,110 +41,103 @@ const AVATAR_FALLBACK_DATA_URI =
         '</svg>'
     );
 
+// ============================================================
+// مكوّن صغير لعرض صف معلومات داخل مودال التفاصيل
+// ============================================================
+function DetailRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
+    return (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-2 border-b border-gray-100 dark:border-gray-800 last:border-0">
+            <span className="text-sm text-gray-500 dark:text-gray-400 mb-1 sm:mb-0">{label}</span>
+            <span className={`text-sm font-medium text-gray-900 dark:text-gray-100 text-right ${mono ? 'font-mono break-all' : ''}`}>
+                {value ?? '-'}
+            </span>
+        </div>
+    );
+}
+
 export default function PlanRequestsPage() {
     const { t } = useTranslation();
-    const { planRequests, filters: pageFilters = {}, auth, globalSettings } = usePage().props as any;
+    const { planRequests, plans = [], filters: pageFilters = {}, auth, globalSettings } = usePage().props as any;
     const permissions = auth?.permissions || [];
 
-    // State
+    // ============================================================
+    // State — فلاتر الجدول
+    // ============================================================
     const [searchTerm, setSearchTerm] = useState(pageFilters.search || '');
     const [selectedStatus, setSelectedStatus] = useState(pageFilters.status || '_empty_');
     const [showFilters, setShowFilters] = useState(false);
 
-    // Check if any filters are active
+    // ============================================================
+    // State — مودال عرض التفاصيل
+    // ============================================================
+    const [detailsOpen, setDetailsOpen] = useState(false);
+    const [detailsLoading, setDetailsLoading] = useState(false);
+    const [detailsData, setDetailsData] = useState<any>(null);
+    const [detailsError, setDetailsError] = useState<string | null>(null);
+
+    // ============================================================
+    // State — مودال تغيير الخطة
+    // ============================================================
+    const [changePlanOpen, setChangePlanOpen] = useState(false);
+    const [changePlanItemId, setChangePlanItemId] = useState<number | null>(null);
+    const [changePlanCurrentId, setChangePlanCurrentId] = useState<number | null>(null);
+    const [newPlanId, setNewPlanId] = useState<string>('');
+    const [changePlanSubmitting, setChangePlanSubmitting] = useState(false);
+
+    // مزامنة state محلية عند تغيّر pageFilters
+    useEffect(() => {
+        setSearchTerm(pageFilters.search || '');
+        setSelectedStatus(pageFilters.status || '_empty_');
+    }, [pageFilters.search, pageFilters.status]);
+
+    // Always-valid per_page
+    const currentPerPage = pageFilters.per_page
+        ? parseInt(String(pageFilters.per_page), 10) || 10
+        : 10;
+
     const hasActiveFilters = () => {
         return selectedStatus !== '_empty_' || searchTerm !== '';
     };
 
-    // Count active filters
     const activeFilterCount = () => {
         return (selectedStatus !== '_empty_' ? 1 : 0) +
             (searchTerm !== '' ? 1 : 0);
     };
 
-    const handleSearch = (e: React.FormEvent) => {
-        e.preventDefault();
-        applyFilters();
-    };
-
-    const applyFilters = () => {
-        router.get(route('plan-requests.index'), {
+    // ============================================================
+    // Helpers للتنقّل مع الحفاظ على الفلاتر
+    // ============================================================
+    const navigateWithFilters = (overrides: Record<string, any> = {}) => {
+        const params: Record<string, any> = {
             page: 1,
             search: searchTerm || undefined,
             status: selectedStatus !== '_empty_' ? selectedStatus : undefined,
-            per_page: pageFilters.per_page
-        }, { preserveState: true, preserveScroll: true });
+            per_page: currentPerPage,
+            sort_field: pageFilters.sort_field,
+            sort_direction: pageFilters.sort_direction,
+            ...overrides,
+        };
+
+        Object.keys(params).forEach(k => {
+            if (params[k] === undefined || params[k] === null) delete params[k];
+        });
+
+        router.get(route('plan-requests.index'), params, {
+            preserveState: true,
+            preserveScroll: true,
+        });
     };
+
+    const handleSearch = (e: React.FormEvent) => {
+        e.preventDefault();
+        navigateWithFilters({ page: 1 });
+    };
+
+    const applyFilters = () => navigateWithFilters({ page: 1 });
 
     const handleSort = (field: string) => {
         const direction = pageFilters.sort_field === field && pageFilters.sort_direction === 'asc' ? 'desc' : 'asc';
-
-        router.get(route('plan-requests.index'), {
-            sort_field: field,
-            sort_direction: direction,
-            page: 1,
-            search: searchTerm || undefined,
-            status: selectedStatus !== '_empty_' ? selectedStatus : undefined,
-            per_page: pageFilters.per_page
-        }, { preserveState: true, preserveScroll: true });
-    };
-
-    const handleAction = (action: string, item: any) => {
-        if (action === 'approve') {
-            if (!globalSettings?.is_demo) {
-                toast.loading(t('Approving plan request...'));
-            }
-
-            router.post(route('plan-requests.approve', item.id), {}, {
-                onSuccess: (page) => {
-                    if (!globalSettings?.is_demo) {
-                        toast.dismiss();
-                    }
-                    if (page.props.flash.success) {
-                        toast.success(t(page.props.flash.success));
-                    } else if (page.props.flash.error) {
-                        toast.error(t(page.props.flash.error));
-                    }
-                },
-                onError: (errors) => {
-                    if (!globalSettings?.is_demo) {
-                        toast.dismiss();
-                    }
-                    if (typeof errors === 'string') {
-                        toast.error(t(errors));
-                    } else {
-                        toast.error(t('Failed to approve plan request: {{errors}}', { errors: Object.values(errors).join(', ') }));
-                    }
-                }
-            });
-        } else if (action === 'reject') {
-            if (!globalSettings?.is_demo) {
-                toast.loading(t('Rejecting plan request...'));
-            }
-
-            router.post(route('plan-requests.reject', item.id), {}, {
-                onSuccess: (page) => {
-                    if (!globalSettings?.is_demo) {
-                        toast.dismiss();
-                    }
-                    if (page.props.flash.success) {
-                        toast.success(t(page.props.flash.success));
-                    } else if (page.props.flash.error) {
-                        toast.error(t(page.props.flash.error));
-                    }
-                },
-                onError: (errors) => {
-                    if (!globalSettings?.is_demo) {
-                        toast.dismiss();
-                    }
-                    if (typeof errors === 'string') {
-                        toast.error(t(errors));
-                    } else {
-                        toast.error(t('Failed to reject plan request: {{errors}}', { errors: Object.values(errors).join(', ') }));
-                    }
-                }
-            });
-        }
+        navigateWithFilters({ sort_field: field, sort_direction: direction, page: 1 });
     };
 
     const handleResetFilters = () => {
@@ -139,8 +147,143 @@ export default function PlanRequestsPage() {
 
         router.get(route('plan-requests.index'), {
             page: 1,
-            per_page: pageFilters.per_page
+            per_page: currentPerPage,
         }, { preserveState: true, preserveScroll: true });
+    };
+
+    // ============================================================
+    // Actions handler — approve / reject / view / change-plan
+    // ============================================================
+    const handleAction = (action: string, item: any) => {
+        if (action === 'approve') {
+            if (!globalSettings?.is_demo) toast.loading(t('Approving plan request...'));
+            router.post(route('plan-requests.approve', item.id), {}, {
+                onSuccess: (page) => {
+                    if (!globalSettings?.is_demo) toast.dismiss();
+                    if (page.props.flash?.success) toast.success(t(page.props.flash.success));
+                    else if (page.props.flash?.error) toast.error(t(page.props.flash.error));
+                },
+                onError: (errors) => {
+                    if (!globalSettings?.is_demo) toast.dismiss();
+                    if (typeof errors === 'string') toast.error(t(errors));
+                    else toast.error(t('Failed to approve plan request: {{errors}}', { errors: Object.values(errors).join(', ') }));
+                },
+            });
+        } else if (action === 'reject') {
+            if (!globalSettings?.is_demo) toast.loading(t('Rejecting plan request...'));
+            router.post(route('plan-requests.reject', item.id), {}, {
+                onSuccess: (page) => {
+                    if (!globalSettings?.is_demo) toast.dismiss();
+                    if (page.props.flash?.success) toast.success(t(page.props.flash.success));
+                    else if (page.props.flash?.error) toast.error(t(page.props.flash.error));
+                },
+                onError: (errors) => {
+                    if (!globalSettings?.is_demo) toast.dismiss();
+                    if (typeof errors === 'string') toast.error(t(errors));
+                    else toast.error(t('Failed to reject plan request: {{errors}}', { errors: Object.values(errors).join(', ') }));
+                },
+            });
+        } else if (action === 'view') {
+            openDetailsModal(item.id);
+        } else if (action === 'change-plan') {
+            openChangePlanModal(item);
+        }
+    };
+
+    // ============================================================
+    // مودال التفاصيل — جلب البيانات من show() endpoint
+    // ============================================================
+    const openDetailsModal = (id: number) => {
+        setDetailsOpen(true);
+        setDetailsLoading(true);
+        setDetailsError(null);
+        setDetailsData(null);
+
+        // استخدام fetch مباشرة (وليس router.get) لأن endpoint يُرجع JSON
+        // ولا نريد إعادة render صفحة Inertia كاملة
+        fetch(route('plan-requests.show', id), {
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+        })
+            .then(async (res) => {
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(text || `HTTP ${res.status}`);
+                }
+                return res.json();
+            })
+            .then((data) => {
+                setDetailsData(data);
+            })
+            .catch((err) => {
+                console.error('Failed to load plan request details:', err);
+                setDetailsError(err.message || 'Failed to load details');
+            })
+            .finally(() => setDetailsLoading(false));
+    };
+
+    const closeDetailsModal = () => {
+        setDetailsOpen(false);
+        // تأخير بسيط حتى لا تومض بيانات قديمة عند الفتح التالي
+        setTimeout(() => {
+            setDetailsData(null);
+            setDetailsError(null);
+        }, 200);
+    };
+
+    // ============================================================
+    // مودال تغيير الخطة
+    // ============================================================
+    const openChangePlanModal = (item: any) => {
+        setChangePlanItemId(item.id);
+        setChangePlanCurrentId(item.plan?.id ?? null);
+        setNewPlanId(item.plan?.id ? String(item.plan.id) : '');
+        setChangePlanOpen(true);
+    };
+
+    const closeChangePlanModal = () => {
+        setChangePlanOpen(false);
+        setChangePlanItemId(null);
+        setChangePlanCurrentId(null);
+        setNewPlanId('');
+    };
+
+    const submitChangePlan = () => {
+        if (!changePlanItemId) return;
+        if (!newPlanId) {
+            toast.error(t('Please select a plan'));
+            return;
+        }
+        if (changePlanCurrentId && Number(newPlanId) === changePlanCurrentId) {
+            toast.error(t('New plan is the same as current plan'));
+            return;
+        }
+
+        setChangePlanSubmitting(true);
+        if (!globalSettings?.is_demo) toast.loading(t('Updating plan...'));
+
+        router.put(
+            route('plan-requests.change-plan', changePlanItemId),
+            { plan_id: newPlanId },
+            {
+                onSuccess: (page) => {
+                    setChangePlanSubmitting(false);
+                    if (!globalSettings?.is_demo) toast.dismiss();
+                    if (page.props.flash?.success) toast.success(t(page.props.flash.success));
+                    else if (page.props.flash?.error) toast.error(t(page.props.flash.error));
+                    closeChangePlanModal();
+                },
+                onError: (errors) => {
+                    setChangePlanSubmitting(false);
+                    if (!globalSettings?.is_demo) toast.dismiss();
+                    if (typeof errors === 'string') toast.error(t(errors));
+                    else toast.error(t('Failed to update plan: {{errors}}', { errors: Object.values(errors).join(', ') }));
+                },
+            }
+        );
     };
 
     const breadcrumbs = [
@@ -149,13 +292,17 @@ export default function PlanRequestsPage() {
         { title: t('Plan Requests') }
     ];
 
-    // Define table columns
+    // ============================================================
+    // Table columns
+    // ============================================================
     const columns = [
         {
             key: 'user.name',
             label: t('Company'),
             render: (_, row) => {
-                const avatarUrl = row.user?.avatar ? getDisplayUrl(row.user.avatar) : getDisplayUrl('media/avatars/avatar.png');
+                const avatarUrl = row.user?.avatar
+                    ? getDisplayUrl(row.user.avatar)
+                    : getDisplayUrl('media/avatars/avatar.png');
                 return (
                     <div className="flex items-center gap-3">
                         <img
@@ -164,15 +311,10 @@ export default function PlanRequestsPage() {
                             className="h-10 w-10 rounded-full object-cover"
                             onError={(e) => {
                                 const target = e.target as HTMLImageElement;
-
-                                // إن سبق وعيّننا fallback من قبل → نستخدم data URI ثابت
-                                // لكسر الحلقة اللانهائية فوراً.
                                 if (target.dataset.fallbackApplied === 'true') {
                                     target.src = AVATAR_FALLBACK_DATA_URI;
                                     return;
                                 }
-
-                                // أول فشل: نحاول مرة واحدة بالـ avatar الافتراضي ونوسم العنصر
                                 target.dataset.fallbackApplied = 'true';
                                 target.src = getDisplayUrl('media/avatars/avatar.png');
                             }}
@@ -231,9 +373,29 @@ export default function PlanRequestsPage() {
         }
     ];
 
-    // Define table actions - only visible to super admin
-    const isSuperAdmin = auth?.user?.type === 'superadmin';
-    const actions = isSuperAdmin ? [
+    // ============================================================
+    // Actions — بدون شرط isSuperAdmin (يعتمد على permissions فقط)
+    // v6.8: أضفنا "view" (Eye) و "change-plan" (Pencil/Edit)
+    // ============================================================
+    const actions = [
+        {
+            label: t('View Details'),
+            icon: 'Eye',
+            action: 'view',
+            className: 'text-blue-500',
+            requiredPermission: 'manage-plan-requests',
+            // يظهر لكل الطلبات بكل الحالات
+            condition: () => true,
+        },
+        {
+            label: t('Change Plan'),
+            icon: 'Pencil',
+            action: 'change-plan',
+            className: 'text-amber-500',
+            requiredPermission: 'approve-plan-requests',
+            // يظهر لكل الطلبات (يمكن تقييدها بـ pending فقط إن رغبت)
+            condition: () => true,
+        },
         {
             label: t('Approve'),
             icon: 'Check',
@@ -250,15 +412,65 @@ export default function PlanRequestsPage() {
             requiredPermission: 'reject-plan-requests',
             condition: (row) => row.status === 'pending'
         }
-    ] : [];
+    ];
 
-    // Prepare status options for filter
     const statusOptions = [
         { value: '_empty_', label: t('All Status') },
         { value: 'pending', label: t('Pending') },
         { value: 'approved', label: t('Approved') },
         { value: 'rejected', label: t('Rejected') }
     ];
+
+    // ============================================================
+    // Pagination handler
+    // ============================================================
+    const handlePageChange = (url: string | null) => {
+        if (!url) return;
+        try {
+            const urlObj = new URL(url, window.location.origin);
+            const page = urlObj.searchParams.get('page') || 1;
+            router.get(route('plan-requests.index'), {
+                page,
+                search: searchTerm || undefined,
+                status: selectedStatus !== '_empty_' ? selectedStatus : undefined,
+                per_page: currentPerPage,
+                sort_field: pageFilters.sort_field,
+                sort_direction: pageFilters.sort_direction,
+            }, { preserveState: true, preserveScroll: true });
+        } catch {
+            router.get(url, {}, { preserveState: true, preserveScroll: true });
+        }
+    };
+
+    // ============================================================
+    // Helper لتقديم شارة نوع المستخدم (صاحب/موظف)
+    // ============================================================
+    const renderUserTypeBadge = (u: any) => {
+        if (!u) return '-';
+        const isOwner = u.is_owner === true || u.type === 'company' || u.type === 'superadmin';
+        const isStaff = u.is_staff === true || u.type === 'staff';
+
+        if (isOwner) {
+            return (
+                <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
+                    {t('Company Owner')}
+                </span>
+            );
+        }
+        if (isStaff) {
+            return (
+                <span className="inline-flex items-center rounded-md bg-purple-50 px-2 py-1 text-xs font-medium text-purple-700 ring-1 ring-inset ring-purple-600/20">
+                    {t('Staff Member')}
+                </span>
+            );
+        }
+        return <span className="text-xs text-gray-500">{u.type || '-'}</span>;
+    };
+
+    const detailsUser = detailsData?.user;
+    const detailsAvatarUrl = detailsUser?.avatar
+        ? getDisplayUrl(detailsUser.avatar)
+        : getDisplayUrl('media/avatars/avatar.png');
 
     return (
         <PageTemplate
@@ -289,13 +501,16 @@ export default function PlanRequestsPage() {
                     activeFilterCount={activeFilterCount}
                     onResetFilters={handleResetFilters}
                     onApplyFilters={applyFilters}
-                    currentPerPage={pageFilters.per_page?.toString() || "10"}
+                    currentPerPage={String(currentPerPage)}
                     onPerPageChange={(value) => {
+                        const newPerPage = parseInt(value, 10) || 10;
                         router.get(route('plan-requests.index'), {
                             page: 1,
-                            per_page: parseInt(value),
+                            per_page: newPerPage,
                             search: searchTerm || undefined,
-                            status: selectedStatus !== '_empty_' ? selectedStatus : undefined
+                            status: selectedStatus !== '_empty_' ? selectedStatus : undefined,
+                            sort_field: pageFilters.sort_field,
+                            sort_direction: pageFilters.sort_direction,
                         }, { preserveState: true, preserveScroll: true });
                     }}
                 />
@@ -315,16 +530,227 @@ export default function PlanRequestsPage() {
                     permissions={permissions}
                 />
 
-                {/* Pagination section */}
                 <Pagination
                     from={planRequests?.from || 0}
                     to={planRequests?.to || 0}
                     total={planRequests?.total || 0}
                     links={planRequests?.links}
                     entityName={t("plan requests")}
-                    onPageChange={(url) => router.get(url)}
+                    onPageChange={handlePageChange}
                 />
             </div>
+
+            {/* ============================================================ */}
+            {/* مودال عرض تفاصيل الطلب                                       */}
+            {/* ============================================================ */}
+            <Dialog open={detailsOpen} onOpenChange={(o) => o ? setDetailsOpen(true) : closeDetailsModal()}>
+                <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle>{t('Plan Request Details')}</DialogTitle>
+                        <DialogDescription>
+                            {t('Full information about this plan request and its owner.')}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {detailsLoading && (
+                        <div className="py-10 flex items-center justify-center">
+                            <div className="animate-spin h-8 w-8 border-2 border-gray-300 border-t-blue-600 rounded-full" />
+                        </div>
+                    )}
+
+                    {detailsError && !detailsLoading && (
+                        <div className="py-6 text-center text-red-600 text-sm">
+                            {t('Failed to load details: {{error}}', { error: detailsError })}
+                        </div>
+                    )}
+
+                    {detailsData && !detailsLoading && (
+                        <div className="space-y-4">
+                            {/* بطاقة المستخدم */}
+                            <div className="flex items-center gap-4 p-3 rounded-lg bg-gray-50 dark:bg-gray-800">
+                                <img
+                                    src={detailsAvatarUrl}
+                                    alt={detailsUser?.name || 'User'}
+                                    className="h-14 w-14 rounded-full object-cover"
+                                    onError={(e) => {
+                                        const target = e.target as HTMLImageElement;
+                                        if (target.dataset.fallbackApplied === 'true') {
+                                            target.src = AVATAR_FALLBACK_DATA_URI;
+                                            return;
+                                        }
+                                        target.dataset.fallbackApplied = 'true';
+                                        target.src = getDisplayUrl('media/avatars/avatar.png');
+                                    }}
+                                />
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold text-gray-900 dark:text-gray-100 truncate">
+                                        {detailsUser?.name || '-'}
+                                    </div>
+                                    <div className="text-xs text-gray-500 truncate">
+                                        {detailsUser?.email || ''}
+                                    </div>
+                                    <div className="mt-1">
+                                        {renderUserTypeBadge(detailsUser)}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* معلومات الشركة */}
+                            <div>
+                                <h4 className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                                    {t('Company Information')}
+                                </h4>
+                                <DetailRow label={t('Company Name')} value={detailsUser?.company_name} />
+                                <DetailRow
+                                    label={t('Account Type')}
+                                    value={renderUserTypeBadge(detailsUser)}
+                                />
+                            </div>
+
+                            {/* بيانات الترخيص */}
+                            <div>
+                                <h4 className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                                    {t('License Information')}
+                                </h4>
+                                <DetailRow
+                                    label={t('License Key')}
+                                    value={detailsUser?.license_key || t('Not set')}
+                                    mono
+                                />
+                                <DetailRow
+                                    label={t('Hardware ID')}
+                                    value={detailsUser?.hardware_id || t('Not set')}
+                                    mono
+                                />
+                            </div>
+
+                            {/* بيانات الخطة */}
+                            <div>
+                                <h4 className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                                    {t('Plan Information')}
+                                </h4>
+                                <DetailRow label={t('Plan')} value={detailsData?.plan?.name ? capitalize(detailsData.plan.name) : '-'} />
+                                <DetailRow
+                                    label={t('Duration')}
+                                    value={detailsData?.plan?.duration === 'monthly' ? t('Monthly') : detailsData?.plan?.duration === 'yearly' ? t('Yearly') : detailsData?.plan?.duration}
+                                />
+                                <DetailRow
+                                    label={t('Status')}
+                                    value={
+                                        <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium capitalize ${
+                                            detailsData?.status === 'approved' ? 'bg-green-50 text-green-700 ring-1 ring-inset ring-green-600/20' :
+                                            detailsData?.status === 'rejected' ? 'bg-red-50 text-red-700 ring-1 ring-inset ring-red-600/20' :
+                                            'bg-yellow-50 text-yellow-700 ring-1 ring-inset ring-yellow-600/20'
+                                        }`}>
+                                            {t(detailsData?.status)}
+                                        </span>
+                                    }
+                                />
+                            </div>
+
+                            {/* التواريخ والموافقون */}
+                            <div>
+                                <h4 className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                                    {t('Request Timeline')}
+                                </h4>
+                                <DetailRow
+                                    label={t('Request Date')}
+                                    value={detailsData?.created_at ? window.appSettings?.formatDateTime(detailsData.created_at, false) : '-'}
+                                />
+                                {detailsData?.approved_at && (
+                                    <DetailRow
+                                        label={t('Approved At')}
+                                        value={window.appSettings?.formatDateTime(detailsData.approved_at, false)}
+                                    />
+                                )}
+                                {detailsData?.approver && (
+                                    <DetailRow label={t('Approved By')} value={detailsData.approver} />
+                                )}
+                                {detailsData?.rejected_at && (
+                                    <DetailRow
+                                        label={t('Rejected At')}
+                                        value={window.appSettings?.formatDateTime(detailsData.rejected_at, false)}
+                                    />
+                                )}
+                                {detailsData?.rejector && (
+                                    <DetailRow label={t('Rejected By')} value={detailsData.rejector} />
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={closeDetailsModal}>
+                            {t('Close')}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ============================================================ */}
+            {/* مودال تغيير الخطة                                            */}
+            {/* ============================================================ */}
+            <Dialog open={changePlanOpen} onOpenChange={(o) => o ? setChangePlanOpen(true) : closeChangePlanModal()}>
+                <DialogContent className="sm:max-w-[440px]">
+                    <DialogHeader>
+                        <DialogTitle>{t('Change Plan')}</DialogTitle>
+                        <DialogDescription>
+                            {t('Select a new plan for this request. If the request is already approved, the user\'s plan will be updated automatically.')}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-2">
+                        <div className="space-y-2">
+                            <Label htmlFor="new-plan">{t('New Plan')}</Label>
+                            <Select
+                                value={newPlanId}
+                                onValueChange={(v) => setNewPlanId(v)}
+                            >
+                                <SelectTrigger id="new-plan">
+                                    <SelectValue placeholder={t('Select a plan')} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {(plans || []).map((p: any) => (
+                                        <SelectItem key={p.id} value={String(p.id)}>
+                                            {p.name}
+                                            {p.duration && (
+                                                <span className="text-xs text-gray-500 ml-1">
+                                                    ({p.duration === 'monthly' ? t('Monthly') : t('Yearly')})
+                                                </span>
+                                            )}
+                                            {changePlanCurrentId && p.id === changePlanCurrentId && (
+                                                <span className="text-xs text-blue-600 ml-1">• {t('current')}</span>
+                                            )}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {changePlanCurrentId && Number(newPlanId) === changePlanCurrentId && newPlanId !== '' && (
+                            <p className="text-xs text-amber-600">
+                                {t('Selected plan is the same as the current plan.')}
+                            </p>
+                        )}
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={closeChangePlanModal}
+                            disabled={changePlanSubmitting}
+                        >
+                            {t('Cancel')}
+                        </Button>
+                        <Button
+                            onClick={submitChangePlan}
+                            disabled={changePlanSubmitting || !newPlanId || (changePlanCurrentId !== null && Number(newPlanId) === changePlanCurrentId)}
+                        >
+                            {changePlanSubmitting ? t('Saving...') : t('Save Changes')}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </PageTemplate>
     );
 }
