@@ -1,6 +1,6 @@
 import { PageTemplate } from '@/components/page-template';
 import { usePage, useForm } from '@inertiajs/react';
-import { ArrowLeft, Heart, Clock, Stethoscope, Info, Lock } from 'lucide-react';
+import { ArrowLeft, Heart, Clock, Stethoscope, Info, Lock, ChevronDown, X, Search } from 'lucide-react';
 import MediaPicker from '@/components/MediaPicker';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,8 +14,240 @@ import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/components/custom-toast';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 
+/* ============================================================
+ * MultiSelect — self-contained multi-select dropdown
+ * Reusable for Tags, Primary Indications, Pairs Well With.
+ * ============================================================ */
+type MultiSelectOption = {
+    value: string;
+    label: string;
+    color?: string;
+};
+
+interface MultiSelectProps {
+    options: MultiSelectOption[];
+    value: string[];
+    onChange: (value: string[]) => void;
+    placeholder?: string;
+    emptyMessage?: string;
+    searchPlaceholder?: string;
+    searchable?: boolean;
+    maxItems?: number;
+    error?: string;
+    required?: boolean;
+    disabled?: boolean;
+    maxHeight?: number;
+}
+
+function MultiSelect({
+    options,
+    value,
+    onChange,
+    placeholder = 'Select...',
+    emptyMessage = 'No options available',
+    searchPlaceholder = 'Search...',
+    searchable = true,
+    maxItems,
+    error,
+    required = false,
+    disabled = false,
+    maxHeight = 240,
+}: MultiSelectProps) {
+    const { t } = useTranslation();
+    const [open, setOpen] = useState(false);
+    const [search, setSearch] = useState('');
+    const containerRef = useRef<HTMLDivElement>(null);
+    const searchInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        if (!open) return;
+        const handleClick = (e: MouseEvent) => {
+            if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+                setOpen(false);
+                setSearch('');
+            }
+        };
+        const handleKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setOpen(false);
+                setSearch('');
+            }
+        };
+        document.addEventListener('mousedown', handleClick);
+        document.addEventListener('keydown', handleKey);
+        setTimeout(() => searchInputRef.current?.focus(), 0);
+        return () => {
+            document.removeEventListener('mousedown', handleClick);
+            document.removeEventListener('keydown', handleKey);
+        };
+    }, [open]);
+
+    const filtered = useMemo(() => {
+        if (!search.trim()) return options;
+        const q = search.toLowerCase().trim();
+        return options.filter(opt => opt.label.toLowerCase().includes(q));
+    }, [options, search]);
+
+    const optionMap = useMemo(() => {
+        const m = new Map<string, MultiSelectOption>();
+        options.forEach(o => m.set(o.value, o));
+        return m;
+    }, [options]);
+
+    const toggle = (val: string) => {
+        if (disabled) return;
+        if (value.includes(val)) {
+            onChange(value.filter(v => v !== val));
+        } else {
+            if (maxItems && value.length >= maxItems) return;
+            onChange([...value, val]);
+        }
+    };
+
+    const remove = (val: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (disabled) return;
+        onChange(value.filter(v => v !== val));
+    };
+
+    const selectedItems = value
+        .map(v => optionMap.get(v))
+        .filter((o): o is MultiSelectOption => !!o);
+
+    return (
+        <div ref={containerRef} className="relative">
+            <button
+                type="button"
+                onClick={() => !disabled && setOpen(o => !o)}
+                disabled={disabled}
+                className={`flex w-full items-center justify-between rounded-md border bg-transparent px-3 py-2 text-sm text-left min-h-[40px] transition-colors ${disabled ? 'opacity-50 cursor-not-allowed bg-muted' : 'hover:bg-accent/50'} ${error ? 'border-red-500' : 'border-input'} ${open && !disabled ? 'ring-2 ring-ring ring-offset-1' : ''}`}
+                aria-expanded={open}
+                aria-haspopup="listbox"
+                aria-disabled={disabled}
+            >
+                <div className="flex flex-wrap items-center gap-1 flex-1 min-w-0">
+                    {selectedItems.length === 0 ? (
+                        <span className="text-muted-foreground truncate">
+                            {placeholder}
+                            {required && <span className="text-red-500 ml-0.5">*</span>}
+                        </span>
+                    ) : (
+                        selectedItems.map(item => (
+                            <Badge
+                                key={item.value}
+                                variant="secondary"
+                                style={item.color ? {
+                                    backgroundColor: item.color + '20',
+                                    color: item.color,
+                                    borderColor: item.color + '40',
+                                } : undefined}
+                                className="text-xs gap-1 pr-1"
+                            >
+                                <span className="truncate max-w-[160px]">{item.label}</span>
+                                {!disabled && (
+                                    <span
+                                        role="button"
+                                        tabIndex={0}
+                                        onClick={(e) => remove(item.value, e)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); remove(item.value, e as any); } }}
+                                        className="ml-0.5 rounded-full hover:bg-black/10 dark:hover:bg-white/20 p-0.5 cursor-pointer inline-flex"
+                                        aria-label={`Remove ${item.label}`}
+                                    >
+                                        <X className="h-3 w-3" />
+                                    </span>
+                                )}
+                            </Badge>
+                        ))
+                    )}
+                </div>
+                <ChevronDown className={`h-4 w-4 opacity-50 shrink-0 ml-2 transition-transform ${open ? 'rotate-180' : ''}`} />
+            </button>
+
+            {open && !disabled && (
+                <div
+                    className="absolute z-50 mt-1 w-full bg-popover border rounded-md shadow-md flex flex-col"
+                    role="listbox"
+                    style={{ maxHeight: maxHeight + (searchable ? 50 : 0) + 8 }}
+                >
+                    {searchable && (
+                        <div className="p-2 border-b sticky top-0 bg-popover z-10">
+                            <div className="relative">
+                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                                <Input
+                                    ref={searchInputRef}
+                                    value={search}
+                                    onChange={(e) => setSearch(e.target.value)}
+                                    placeholder={searchPlaceholder}
+                                    className="h-8 pl-7 text-sm"
+                                />
+                            </div>
+                        </div>
+                    )}
+                    <div className="overflow-y-auto flex-1 p-1" style={{ maxHeight }}>
+                        {filtered.length === 0 ? (
+                            <p className="text-sm text-muted-foreground text-center py-4 px-2">
+                                {search.trim() ? t('No matching options') : emptyMessage}
+                            </p>
+                        ) : (
+                            filtered.map(opt => {
+                                const checked = value.includes(opt.value);
+                                const isMax = !checked && !!maxItems && value.length >= maxItems;
+                                return (
+                                    <label
+                                        key={opt.value}
+                                        className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm transition-colors ${checked ? 'bg-primary/10' : 'hover:bg-accent'} ${isMax ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        <Checkbox
+                                            checked={checked}
+                                            disabled={isMax}
+                                            onCheckedChange={() => !isMax && toggle(opt.value)}
+                                        />
+                                        {opt.color && (
+                                            <span
+                                                className="h-3 w-3 rounded-full inline-block shrink-0 border"
+                                                style={{ backgroundColor: opt.color }}
+                                                aria-hidden
+                                            />
+                                        )}
+                                        <span className="truncate flex-1">{opt.label}</span>
+                                        {checked && (
+                                            <span className="text-xs text-muted-foreground">
+                                                {t('Selected')}
+                                            </span>
+                                        )}
+                                    </label>
+                                );
+                            })
+                        )}
+                    </div>
+                    {value.length > 0 && (
+                        <div className="border-t p-1.5 flex items-center justify-between sticky bottom-0 bg-popover">
+                            <span className="text-xs text-muted-foreground px-1.5">
+                                {value.length} {value.length === 1 ? t('item selected') : t('items selected')}
+                            </span>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => onChange([])}
+                            >
+                                {t('Clear all')}
+                            </Button>
+                        </div>
+                    )}
+                </div>
+            )}
+            {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+        </div>
+    );
+}
+
+/* ============================================================
+ * Page — Product Edit
+ * ============================================================ */
 export default function ProductEdit() {
     const { t } = useTranslation();
     const {
@@ -39,9 +271,6 @@ export default function ProductEdit() {
     const isCompany = auth?.user?.type === 'company';
 
     // If a COMPANY user is editing a super admin product, many fields are read-only.
-    // Super admin can always edit ALL fields on any product.
-    // Only: description, sale_price, category, contraindications, research_links,
-    //       primary_indications, dosing schedule, tags, and practitioner fields are editable by company users
     const isLocked = isSuperAdminProduct && isCompany;
 
     const validMainImageId = product.main_image_id && mainImage ? product.main_image_id : null;
@@ -49,7 +278,6 @@ export default function ProductEdit() {
         ? product.additional_image_ids.filter((id: number) => additionalImages.some((img: any) => img.id === id))
         : [];
 
-    // Helper: get override value or fall back to original
     const getEffectiveValue = (field: string, originalValue: any) => {
         if (override && override[field] !== null && override[field] !== undefined) {
             return override[field];
@@ -116,7 +344,6 @@ export default function ProductEdit() {
         // ===== Images =====
         main_image_id: validMainImageId as number | null,
         additional_image_ids: validAdditionalImageIds as number[],
-
     });
 
     const [dosingDisabled, setDosingDisabled] = useState(!!data.dosing_na);
@@ -128,6 +355,29 @@ export default function ProductEdit() {
     const handleInputChange = (name: string, value: string | boolean | string[] | number | number[] | null) => {
         setData(name as any, value as any);
     };
+
+    // ============ MultiSelect options (memoized) ============
+    const tagOptions: MultiSelectOption[] = useMemo(() => {
+        return (tags ?? []).map((tag: any) => ({
+            value: tag.id.toString(),
+            label: tag.name,
+            color: tag.color,
+        }));
+    }, [tags]);
+
+    const primaryIndicationOptions: MultiSelectOption[] = useMemo(() => {
+        return (primaryIndications ?? []).map((ind: { id: number; name: string }) => ({
+            value: ind.name,
+            label: ind.name,
+        }));
+    }, [primaryIndications]);
+
+    const pairsWellWithOptions: MultiSelectOption[] = useMemo(() => {
+        return (availableProducts ?? []).map((p: any) => ({
+            value: p.id.toString(),
+            label: p.name,
+        }));
+    }, [availableProducts]);
 
     const breadcrumbs = [
         { title: t('Dashboard'), href: route('dashboard') },
@@ -154,7 +404,6 @@ export default function ProductEdit() {
 
         requiredFields.forEach(({ name, label }) => {
             const value = data[name];
-            // Skip locked fields from validation (they're read-only)
             if (isLocked && ['name', 'product_sku', 'product_form', 'bottle_size', 'price', 'main_image_id', 'category_id'].includes(name)) {
                 return;
             }
@@ -203,7 +452,7 @@ export default function ProductEdit() {
         { key: 'dosing_before_sleep', label: t('Before Sleep'), icon: '😴' },
     ];
 
-    // Locked Field Component - shows value as read-only with lock icon
+    // Locked Field Component
     const LockedField = ({ label, value, hint }: { label: string; value: string; hint?: string }) => (
         <div className="space-y-2">
             <Label className="text-sm font-medium">{label}</Label>
@@ -228,7 +477,6 @@ export default function ProductEdit() {
                 }
             ]}
         >
-            {/* Super Admin Product Alert - Only shown for company users editing super admin products */}
             {isLocked && (
                 <Alert className="mb-6 border-blue-300 bg-blue-50 dark:bg-blue-950/30">
                     <Info className="h-4 w-4 text-blue-600" />
@@ -280,7 +528,6 @@ export default function ProductEdit() {
 
                                 {/* Category + SKU */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {/* Category: read-only LockedField when editing a Super Admin product (company cannot change it); dropdown otherwise */}
                                     {isLocked ? (
                                         <LockedField
                                             label={t('Category')}
@@ -308,7 +555,6 @@ export default function ProductEdit() {
                                         </div>
                                     )}
 
-                                    {/* SKU - always read-only after creation */}
                                     <LockedField
                                         label={t('Product SKU / Item Number')}
                                         value={data.product_sku}
@@ -363,7 +609,6 @@ export default function ProductEdit() {
                                         </div>
                                     )}
 
-                                    {/* Brand */}
                                     {isLocked ? (
                                         <LockedField label={t('Supplier / Brand')} value={brands?.find((b: any) => b.id.toString() === data.brand_id)?.name || ''} />
                                     ) : (
@@ -385,39 +630,35 @@ export default function ProductEdit() {
                                     )}
                                 </div>
 
-                                {/* Tags - always editable */}
+                                {/* ============ Tags — MultiSelect ============ */}
                                 <div className="space-y-2">
                                     <Label className="text-sm font-medium" required>
                                         {t('Tags')}
                                     </Label>
-                                    <div className="flex flex-wrap gap-2 border rounded-md p-3 min-h-[42px]">
-                                        {tags?.map((tag: any) => (
-                                            <label key={tag.id} className="inline-flex items-center gap-1.5 cursor-pointer">
-                                                <Checkbox
-                                                    checked={data.tag_id.includes(tag.id.toString())}
-                                                    onCheckedChange={(checked) => {
-                                                        const tagId = tag.id.toString();
-                                                        if (checked) {
-                                                            handleInputChange('tag_id', [...data.tag_id, tagId]);
-                                                        } else {
-                                                            handleInputChange('tag_id', data.tag_id.filter((id: string) => id !== tagId));
-                                                        }
-                                                    }}
-                                                />
-                                                <Badge
-                                                    variant="secondary"
-                                                    className="cursor-pointer hover:bg-primary/10"
-                                                    style={tag.color ? { backgroundColor: tag.color + '20', color: tag.color, borderColor: tag.color + '40' } : undefined}
-                                                >
-                                                    {tag.name}
-                                                </Badge>
-                                            </label>
-                                        ))}
-                                    </div>
-                                    {errors.tag_id && <p className="text-xs text-red-500">{errors.tag_id}</p>}
+                                    <MultiSelect
+                                        options={tagOptions}
+                                        value={data.tag_id}
+                                        onChange={(val) => handleInputChange('tag_id', val)}
+                                        placeholder={t('Select tags...')}
+                                        emptyMessage={t('No tags available')}
+                                        searchPlaceholder={t('Search tags...')}
+                                        error={errors.tag_id}
+                                        required
+                                    />
+                                    {data.tag_id.length > 0 && (
+                                        <p className="text-xs text-muted-foreground">
+                                            {data.tag_id.length} {data.tag_id.length === 1 ? t('tag selected') : t('tags selected')}
+                                        </p>
+                                    )}
+                                    {isLocked && (
+                                        <p className="text-xs text-blue-600 flex items-center gap-1">
+                                            <Info className="h-3 w-3" />
+                                            {t('Your tag selection will be saved as company override')}
+                                        </p>
+                                    )}
                                 </div>
 
-                                {/* Pairs Well With - read-only for super admin products */}
+                                {/* ============ Pairs Well With — MultiSelect (or LockedField) ============ */}
                                 {isLocked ? (
                                     <LockedField
                                         label={t('Pairs Well With')}
@@ -429,26 +670,19 @@ export default function ProductEdit() {
                                 ) : (
                                     <div className="space-y-2">
                                         <Label className="text-sm font-medium">{t('Pairs Well With')}</Label>
-                                        <div className="flex flex-wrap gap-2 border rounded-md p-3 min-h-[42px]">
-                                            {availableProducts?.map((prod: any) => (
-                                                <label key={prod.id} className="inline-flex items-center gap-1.5 cursor-pointer">
-                                                    <Checkbox
-                                                        checked={data.pairs_well_with.includes(prod.id.toString())}
-                                                        onCheckedChange={(checked) => {
-                                                            const productId = prod.id.toString();
-                                                            if (checked) {
-                                                                handleInputChange('pairs_well_with', [...data.pairs_well_with, productId]);
-                                                            } else {
-                                                                handleInputChange('pairs_well_with', data.pairs_well_with.filter((id: string) => id !== productId));
-                                                            }
-                                                        }}
-                                                    />
-                                                    <Badge variant="outline" className="cursor-pointer hover:bg-accent">
-                                                        {prod.name}
-                                                    </Badge>
-                                                </label>
-                                            ))}
-                                        </div>
+                                        <MultiSelect
+                                            options={pairsWellWithOptions}
+                                            value={data.pairs_well_with}
+                                            onChange={(val) => handleInputChange('pairs_well_with', val)}
+                                            placeholder={t('Select products...')}
+                                            emptyMessage={t('No other products available')}
+                                            searchPlaceholder={t('Search products...')}
+                                        />
+                                        {data.pairs_well_with.length > 0 && (
+                                            <p className="text-xs text-muted-foreground">
+                                                {data.pairs_well_with.length} {data.pairs_well_with.length === 1 ? t('product selected') : t('products selected')}
+                                            </p>
+                                        )}
                                     </div>
                                 )}
 
@@ -497,7 +731,7 @@ export default function ProductEdit() {
                                     </div>
                                 </div>
 
-                                {/* Stock Status - locked for super admin products */}
+                                {/* Stock Status */}
                                 {isLocked ? (
                                     <LockedField label={t('Stock Status')} value={data.stock_status === 'in_stock' ? t('In Stock') : data.stock_status === 'out_of_stock' ? t('Out of Stock') : t('On Backorder')} />
                                 ) : (
@@ -525,7 +759,7 @@ export default function ProductEdit() {
                                     </div>
                                 )}
 
-                                {/* Stock Quantity - locked for super admin products */}
+                                {/* Stock Quantity */}
                                 {isLocked ? (
                                     <LockedField label={t('Stock Quantity')} value={data.stock_quantity} />
                                 ) : (
@@ -545,7 +779,6 @@ export default function ProductEdit() {
 
                                 {/* Status + Tax + Weight */}
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    {/* Status - locked for super admin products */}
                                     {isLocked ? (
                                         <LockedField label={t('Status')} value={data.status === 'active' ? t('Active') : t('Inactive')} />
                                     ) : (
@@ -662,12 +895,8 @@ export default function ProductEdit() {
 
                                 <Separator />
 
-                                {/* Product Image URL */}
                                 {isLocked ? (
-                                    <LockedField
-                                        label={t('Product Image URL')}
-                                        value={data.product_image_url}
-                                    />
+                                    <LockedField label={t('Product Image URL')} value={data.product_image_url} />
                                 ) : (
                                     <div className="space-y-2">
                                         <Label htmlFor="product_image_url">{t('Product Image URL')}</Label>
@@ -689,7 +918,6 @@ export default function ProductEdit() {
                                 <CardTitle>{t('Product Description')}</CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-4">
-                                {/* Description - always editable */}
                                 <div className="space-y-2">
                                     <Label htmlFor="description" className="text-sm font-medium">{t('Description')}</Label>
                                     <Textarea
@@ -752,39 +980,18 @@ export default function ProductEdit() {
                                 </CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-4 pt-4">
-                                {/* Primary Indications - always editable (checkboxes from primary_indications table) */}
+                                {/* ============ Primary Indications — MultiSelect ============ */}
                                 <div className="space-y-2">
                                     <Label className="text-sm font-medium">{t('Primary Indications')}</Label>
-                                    <div className="border rounded-md p-3 max-h-[200px] overflow-y-auto">
-                                        {primaryIndications && primaryIndications.length > 0 ? (
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                                                {primaryIndications.map((indication: { id: number; name: string }) => {
-                                                    const isChecked = data.primary_indications.includes(indication.name);
-                                                    return (
-                                                        <label
-                                                            key={indication.id}
-                                                            className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors hover:bg-accent ${isChecked ? 'bg-primary/10 border-primary' : 'border-input'}`}
-                                                        >
-                                                            <Checkbox
-                                                                checked={isChecked}
-                                                                onCheckedChange={(checked) => {
-                                                                    const newValue = checked
-                                                                        ? [...data.primary_indications, indication.name]
-                                                                        : data.primary_indications.filter((n: string) => n !== indication.name);
-                                                                    handleInputChange('primary_indications', newValue);
-                                                                }}
-                                                            />
-                                                            <span className="text-sm">{indication.name}</span>
-                                                        </label>
-                                                    );
-                                                })}
-                                            </div>
-                                        ) : (
-                                            <p className="text-sm text-muted-foreground text-center py-4">
-                                                {t('No primary indications available. Please seed the PrimaryIndicationSeeder first.')}
-                                            </p>
-                                        )}
-                                    </div>
+                                    <MultiSelect
+                                        options={primaryIndicationOptions}
+                                        value={data.primary_indications}
+                                        onChange={(val) => handleInputChange('primary_indications', val)}
+                                        placeholder={t('Select primary indications...')}
+                                        emptyMessage={t('No primary indications available. Please seed the PrimaryIndicationSeeder first.')}
+                                        searchPlaceholder={t('Search indications...')}
+                                        maxHeight={280}
+                                    />
                                     {data.primary_indications.length > 0 && (
                                         <div className="flex flex-wrap gap-1 mt-2">
                                             {data.primary_indications.map((ind: string) => (
@@ -802,7 +1009,6 @@ export default function ProductEdit() {
                                     )}
                                 </div>
 
-                                {/* Supports - read-only for locked products */}
                                 {isLocked ? (
                                     <LockedField label={t('Supports')} value={data.supports} />
                                 ) : (
@@ -818,7 +1024,6 @@ export default function ProductEdit() {
                                     </div>
                                 )}
 
-                                {/* Useful For - read-only for locked */}
                                 {isLocked ? (
                                     <LockedField label={t('Useful For')} value={data.useful_for} />
                                 ) : (
@@ -834,7 +1039,6 @@ export default function ProductEdit() {
                                     </div>
                                 )}
 
-                                {/* Ingredients - read-only for locked */}
                                 {isLocked ? (
                                     <LockedField label={t('Key Active Ingredients')} value={data.ingredients} />
                                 ) : (
@@ -850,7 +1054,6 @@ export default function ProductEdit() {
                                     </div>
                                 )}
 
-                                {/* Contraindications - always editable */}
                                 <div className="space-y-2">
                                     <Label htmlFor="contraindications" className="text-sm font-medium">{t('Contraindications / Warnings')}</Label>
                                     <Textarea
@@ -868,7 +1071,6 @@ export default function ProductEdit() {
                                     )}
                                 </div>
 
-                                {/* Research Links - always editable */}
                                 <div className="space-y-2">
                                     <Label htmlFor="research_links" className="text-sm font-medium">{t('Research / Studies Links')}</Label>
                                     <Textarea
@@ -917,7 +1119,6 @@ export default function ProductEdit() {
                                     ))}
                                 </div>
 
-                                {/* Dosing N/A Toggle - always editable */}
                                 <div className="flex items-center gap-3 pt-2 border-t">
                                     <Checkbox
                                         id="dosing_na"
@@ -959,7 +1160,6 @@ export default function ProductEdit() {
                                 <CardDescription>{t('Visible only to your store customers')}</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4 pt-4">
-                                {/* Practitioner Notes - always editable */}
                                 <div className="space-y-2">
                                     <Label htmlFor="practitioner_notes" className="text-sm font-medium">{t('Practitioner Notes')}</Label>
                                     <Textarea
@@ -972,7 +1172,6 @@ export default function ProductEdit() {
                                     <p className="text-xs text-muted-foreground">{t('Visible only to your store customers')}</p>
                                 </div>
 
-                                {/* Custom Primary Indications - always editable */}
                                 <div className="space-y-2">
                                     <Label className="text-sm font-medium">{t('Custom Primary Indications')}</Label>
                                     <Textarea
@@ -983,7 +1182,6 @@ export default function ProductEdit() {
                                     />
                                 </div>
 
-                                {/* Custom Dosing Notes - always editable */}
                                 <div className="space-y-2">
                                     <Label htmlFor="custom_dosing_notes" className="text-sm font-medium">{t('Custom Dosing Notes')}</Label>
                                     <Textarea
