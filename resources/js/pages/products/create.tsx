@@ -1,6 +1,6 @@
 import { PageTemplate } from '@/components/page-template';
 import { usePage, useForm } from '@inertiajs/react';
-import { ArrowLeft, Heart, Clock, Stethoscope, Info } from 'lucide-react';
+import { ArrowLeft, Heart, Clock, Stethoscope, Info, ChevronDown, X, Search } from 'lucide-react';
 import MediaPicker from '@/components/MediaPicker';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,8 +13,239 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/components/custom-toast';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 
+/* ============================================================
+ * MultiSelect — self-contained multi-select dropdown
+ * Used for Tags and Primary Indications inputs.
+ * No external dependencies beyond shadcn Checkbox + Badge + Input.
+ * ============================================================ */
+type MultiSelectOption = {
+    value: string;          // unique value (id or name)
+    label: string;          // display label
+    color?: string;         // optional hex color (for tags)
+};
+
+interface MultiSelectProps {
+    options: MultiSelectOption[];
+    value: string[];
+    onChange: (value: string[]) => void;
+    placeholder?: string;
+    emptyMessage?: string;
+    searchPlaceholder?: string;
+    searchable?: boolean;
+    maxItems?: number;          // optional cap on selected items
+    error?: string;
+    required?: boolean;
+    maxHeight?: number;         // dropdown list max height in px
+}
+
+function MultiSelect({
+    options,
+    value,
+    onChange,
+    placeholder = 'Select...',
+    emptyMessage = 'No options available',
+    searchPlaceholder = 'Search...',
+    searchable = true,
+    maxItems,
+    error,
+    required = false,
+    maxHeight = 240,
+}: MultiSelectProps) {
+    const { t } = useTranslation();
+    const [open, setOpen] = useState(false);
+    const [search, setSearch] = useState('');
+    const containerRef = useRef<HTMLDivElement>(null);
+    const searchInputRef = useRef<HTMLInputElement>(null);
+
+    // Close on outside click + Escape key
+    useEffect(() => {
+        if (!open) return;
+        const handleClick = (e: MouseEvent) => {
+            if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+                setOpen(false);
+                setSearch('');
+            }
+        };
+        const handleKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setOpen(false);
+                setSearch('');
+            }
+        };
+        document.addEventListener('mousedown', handleClick);
+        document.addEventListener('keydown', handleKey);
+        // Autofocus search when opening
+        setTimeout(() => searchInputRef.current?.focus(), 0);
+        return () => {
+            document.removeEventListener('mousedown', handleClick);
+            document.removeEventListener('keydown', handleKey);
+        };
+    }, [open]);
+
+    // Memoized filtered list (case-insensitive)
+    const filtered = useMemo(() => {
+        if (!search.trim()) return options;
+        const q = search.toLowerCase().trim();
+        return options.filter(opt => opt.label.toLowerCase().includes(q));
+    }, [options, search]);
+
+    // Build a quick lookup map for selected labels
+    const optionMap = useMemo(() => {
+        const m = new Map<string, MultiSelectOption>();
+        options.forEach(o => m.set(o.value, o));
+        return m;
+    }, [options]);
+
+    const toggle = (val: string) => {
+        if (value.includes(val)) {
+            onChange(value.filter(v => v !== val));
+        } else {
+            if (maxItems && value.length >= maxItems) return;
+            onChange([...value, val]);
+        }
+    };
+
+    const remove = (val: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        onChange(value.filter(v => v !== val));
+    };
+
+    const selectedItems = value
+        .map(v => optionMap.get(v))
+        .filter((o): o is MultiSelectOption => !!o);
+
+    return (
+        <div ref={containerRef} className="relative">
+            {/* Trigger */}
+            <button
+                type="button"
+                onClick={() => setOpen(o => !o)}
+                className={`flex w-full items-center justify-between rounded-md border bg-transparent px-3 py-2 text-sm text-left min-h-[40px] transition-colors hover:bg-accent/50 ${error ? 'border-red-500' : 'border-input'} ${open ? 'ring-2 ring-ring ring-offset-1' : ''}`}
+                aria-expanded={open}
+                aria-haspopup="listbox"
+            >
+                <div className="flex flex-wrap items-center gap-1 flex-1 min-w-0">
+                    {selectedItems.length === 0 ? (
+                        <span className="text-muted-foreground truncate">
+                            {placeholder}
+                            {required && <span className="text-red-500 ml-0.5">*</span>}
+                        </span>
+                    ) : (
+                        selectedItems.map(item => (
+                            <Badge
+                                key={item.value}
+                                variant="secondary"
+                                style={item.color ? {
+                                    backgroundColor: item.color + '20',
+                                    color: item.color,
+                                    borderColor: item.color + '40',
+                                } : undefined}
+                                className="text-xs gap-1 pr-1"
+                            >
+                                <span className="truncate max-w-[160px]">{item.label}</span>
+                                <span
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={(e) => remove(item.value, e)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); remove(item.value, e as any); } }}
+                                    className="ml-0.5 rounded-full hover:bg-black/10 dark:hover:bg-white/20 p-0.5 cursor-pointer inline-flex"
+                                    aria-label={`Remove ${item.label}`}
+                                >
+                                    <X className="h-3 w-3" />
+                                </span>
+                            </Badge>
+                        ))
+                    )}
+                </div>
+                <ChevronDown className={`h-4 w-4 opacity-50 shrink-0 ml-2 transition-transform ${open ? 'rotate-180' : ''}`} />
+            </button>
+
+            {/* Dropdown panel */}
+            {open && (
+                <div
+                    className="absolute z-50 mt-1 w-full bg-popover border rounded-md shadow-md flex flex-col"
+                    role="listbox"
+                    style={{ maxHeight: maxHeight + (searchable ? 50 : 0) + 8 }}
+                >
+                    {searchable && (
+                        <div className="p-2 border-b sticky top-0 bg-popover z-10">
+                            <div className="relative">
+                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                                <Input
+                                    ref={searchInputRef}
+                                    value={search}
+                                    onChange={(e) => setSearch(e.target.value)}
+                                    placeholder={searchPlaceholder}
+                                    className="h-8 pl-7 text-sm"
+                                />
+                            </div>
+                        </div>
+                    )}
+                    <div className="overflow-y-auto flex-1 p-1" style={{ maxHeight }}>
+                        {filtered.length === 0 ? (
+                            <p className="text-sm text-muted-foreground text-center py-4 px-2">
+                                {search.trim() ? t('No matching options') : emptyMessage}
+                            </p>
+                        ) : (
+                            filtered.map(opt => {
+                                const checked = value.includes(opt.value);
+                                const disabled = !checked && !!maxItems && value.length >= maxItems;
+                                return (
+                                    <label
+                                        key={opt.value}
+                                        className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm transition-colors ${checked ? 'bg-primary/10' : 'hover:bg-accent'} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        <Checkbox
+                                            checked={checked}
+                                            disabled={disabled}
+                                            onCheckedChange={() => !disabled && toggle(opt.value)}
+                                        />
+                                        {opt.color && (
+                                            <span
+                                                className="h-3 w-3 rounded-full inline-block shrink-0 border"
+                                                style={{ backgroundColor: opt.color }}
+                                                aria-hidden
+                                            />
+                                        )}
+                                        <span className="truncate flex-1">{opt.label}</span>
+                                        {checked && (
+                                            <span className="text-xs text-muted-foreground">
+                                                {t('Selected')}
+                                            </span>
+                                        )}
+                                    </label>
+                                );
+                            })
+                        )}
+                    </div>
+                    {value.length > 0 && (
+                        <div className="border-t p-1.5 flex items-center justify-between sticky bottom-0 bg-popover">
+                            <span className="text-xs text-muted-foreground px-1.5">
+                                {value.length} {value.length === 1 ? t('item selected') : t('items selected')}
+                            </span>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => { onChange([]); }}
+                            >
+                                {t('Clear all')}
+                            </Button>
+                        </div>
+                    )}
+                </div>
+            )}
+            {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+        </div>
+    );
+}
+
+/* ============================================================
+ * Page — Product Create
+ * ============================================================ */
 export default function ProductCreate() {
     const { t } = useTranslation();
     const { categories, brands, taxes, users, tags, primaryIndications, availableProducts, auth } = usePage().props as any;
@@ -100,6 +331,22 @@ export default function ProductCreate() {
         // Liquid → 'oz', Caps → 'caps'
         // We just show a hint in the UI
     }, [data.product_form]);
+
+    // Prepare option arrays for MultiSelect (memoized)
+    const tagOptions: MultiSelectOption[] = useMemo(() => {
+        return (tags ?? []).map((tag: any) => ({
+            value: tag.id.toString(),
+            label: tag.name,
+            color: tag.color,
+        }));
+    }, [tags]);
+
+    const primaryIndicationOptions: MultiSelectOption[] = useMemo(() => {
+        return (primaryIndications ?? []).map((ind: { id: number; name: string }) => ({
+            value: ind.name,
+            label: ind.name,
+        }));
+    }, [primaryIndications]);
 
     const breadcrumbs = [
         { title: t('Dashboard'), href: route('dashboard') },
@@ -308,39 +555,26 @@ export default function ProductCreate() {
                                     </div>
                                 </div>
 
-                                {/* Tags */}
+                                {/* ============ Tags — MultiSelect ============ */}
                                 <div className="space-y-2">
                                     <Label className="text-sm font-medium" required>
                                         {t('Tags')}
                                     </Label>
-                                    <div className="flex flex-wrap gap-2 border rounded-md p-3 min-h-[42px]">
-                                        {tags?.map((tag: any) => (
-                                            <label key={tag.id} className="inline-flex items-center gap-1.5 cursor-pointer">
-                                                <Checkbox
-                                                    checked={data.tag_id.includes(tag.id.toString())}
-                                                    onCheckedChange={(checked) => {
-                                                        const tagId = tag.id.toString();
-                                                        if (checked) {
-                                                            handleInputChange('tag_id', [...data.tag_id, tagId]);
-                                                        } else {
-                                                            handleInputChange('tag_id', data.tag_id.filter((id: string) => id !== tagId));
-                                                        }
-                                                    }}
-                                                />
-                                                <Badge
-                                                    variant="secondary"
-                                                    className="cursor-pointer hover:bg-primary/10"
-                                                    style={tag.color ? { backgroundColor: tag.color + '20', color: tag.color, borderColor: tag.color + '40' } : undefined}
-                                                >
-                                                    {tag.name}
-                                                </Badge>
-                                            </label>
-                                        ))}
-                                        {(!tags || tags.length === 0) && (
-                                            <p className="text-xs text-muted-foreground">{t('No tags available')}</p>
-                                        )}
-                                    </div>
-                                    {errors.tag_id && <p className="text-xs text-red-500">{errors.tag_id}</p>}
+                                    <MultiSelect
+                                        options={tagOptions}
+                                        value={data.tag_id}
+                                        onChange={(val) => handleInputChange('tag_id', val)}
+                                        placeholder={t('Select tags...')}
+                                        emptyMessage={t('No tags available')}
+                                        searchPlaceholder={t('Search tags...')}
+                                        error={errors.tag_id}
+                                        required
+                                    />
+                                    {data.tag_id.length > 0 && (
+                                        <p className="text-xs text-muted-foreground">
+                                            {data.tag_id.length} {data.tag_id.length === 1 ? t('tag selected') : t('tags selected')}
+                                        </p>
+                                    )}
                                 </div>
 
                                 {/* Pairs Well With */}
@@ -612,39 +846,18 @@ export default function ProductCreate() {
                                 <CardDescription>{t('Clinical and health-specific information')}</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4 pt-4">
-                                {/* Primary Indications - Checkboxes from primary_indications table */}
+                                {/* ============ Primary Indications — MultiSelect ============ */}
                                 <div className="space-y-2">
                                     <Label className="text-sm font-medium">{t('Primary Indications')}</Label>
-                                    <div className="border rounded-md p-3 max-h-[200px] overflow-y-auto">
-                                        {primaryIndications && primaryIndications.length > 0 ? (
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                                                {primaryIndications.map((indication: { id: number; name: string }) => {
-                                                    const isChecked = data.primary_indications.includes(indication.name);
-                                                    return (
-                                                        <label
-                                                            key={indication.id}
-                                                            className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors hover:bg-accent ${isChecked ? 'bg-primary/10 border-primary' : 'border-input'}`}
-                                                        >
-                                                            <Checkbox
-                                                                checked={isChecked}
-                                                                onCheckedChange={(checked) => {
-                                                                    const newValue = checked
-                                                                        ? [...data.primary_indications, indication.name]
-                                                                        : data.primary_indications.filter((n: string) => n !== indication.name);
-                                                                    handleInputChange('primary_indications', newValue);
-                                                                }}
-                                                            />
-                                                            <span className="text-sm">{indication.name}</span>
-                                                        </label>
-                                                    );
-                                                })}
-                                            </div>
-                                        ) : (
-                                            <p className="text-sm text-muted-foreground text-center py-4">
-                                                {t('No primary indications available. Please seed the PrimaryIndicationSeeder first.')}
-                                            </p>
-                                        )}
-                                    </div>
+                                    <MultiSelect
+                                        options={primaryIndicationOptions}
+                                        value={data.primary_indications}
+                                        onChange={(val) => handleInputChange('primary_indications', val)}
+                                        placeholder={t('Select primary indications...')}
+                                        emptyMessage={t('No primary indications available. Please seed the PrimaryIndicationSeeder first.')}
+                                        searchPlaceholder={t('Search indications...')}
+                                        maxHeight={280}
+                                    />
                                     {data.primary_indications.length > 0 && (
                                         <div className="flex flex-wrap gap-1 mt-2">
                                             {data.primary_indications.map((ind: string) => (
