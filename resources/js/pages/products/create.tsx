@@ -348,6 +348,13 @@ export default function ProductCreate() {
         }));
     }, [primaryIndications]);
 
+    const pairsWellWithOptions: MultiSelectOption[] = useMemo(() => {
+        return (availableProducts ?? []).map((p: any) => ({
+            value: p.id.toString(),
+            label: p.name,
+        }));
+    }, [availableProducts]);
+
     const breadcrumbs = [
         { title: t('Dashboard'), href: route('dashboard') },
         { title: t('Products'), href: route('products.index') },
@@ -577,34 +584,24 @@ export default function ProductCreate() {
                                     )}
                                 </div>
 
-                                {/* Pairs Well With */}
+                                {/* ============ Pairs Well With — MultiSelect ============ */}
                                 <div className="space-y-2">
                                     <Label className="text-sm font-medium">
                                         {t('Pairs Well With')}
                                     </Label>
-                                    <div className="flex flex-wrap gap-2 border rounded-md p-3 min-h-[42px]">
-                                        {availableProducts?.map((product: any) => (
-                                            <label key={product.id} className="inline-flex items-center gap-1.5 cursor-pointer">
-                                                <Checkbox
-                                                    checked={data.pairs_well_with.includes(product.id.toString())}
-                                                    onCheckedChange={(checked) => {
-                                                        const productId = product.id.toString();
-                                                        if (checked) {
-                                                            handleInputChange('pairs_well_with', [...data.pairs_well_with, productId]);
-                                                        } else {
-                                                            handleInputChange('pairs_well_with', data.pairs_well_with.filter((id: string) => id !== productId));
-                                                        }
-                                                    }}
-                                                />
-                                                <Badge variant="outline" className="cursor-pointer hover:bg-accent">
-                                                    {product.name}
-                                                </Badge>
-                                            </label>
-                                        ))}
-                                        {(!availableProducts || availableProducts.length === 0) && (
-                                            <p className="text-xs text-muted-foreground">{t('No other products available')}</p>
-                                        )}
-                                    </div>
+                                    <MultiSelect
+                                        options={pairsWellWithOptions}
+                                        value={data.pairs_well_with}
+                                        onChange={(val) => handleInputChange('pairs_well_with', val)}
+                                        placeholder={t('Select products...')}
+                                        emptyMessage={t('No other products available')}
+                                        searchPlaceholder={t('Search products...')}
+                                    />
+                                    {data.pairs_well_with.length > 0 && (
+                                        <p className="text-xs text-muted-foreground">
+                                            {data.pairs_well_with.length} {data.pairs_well_with.length === 1 ? t('product selected') : t('products selected')}
+                                        </p>
+                                    )}
                                     <p className="text-xs text-muted-foreground">{t('Select products that pair well with this one.')}</p>
                                 </div>
 
