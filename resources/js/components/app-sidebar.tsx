@@ -11,7 +11,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { hasPermission } from '@/utils/authorization';
 import { getDisplayUrl } from '@/utils/helper';
-
+import { Tag } from 'lucide-react';
 
 export function AppSidebar() {
     const { t, i18n } = useTranslation();
@@ -70,6 +70,11 @@ export function AppSidebar() {
             title: t('Coupons'),
             href: route('coupons.index'),
             icon: TicketPercent,
+        },
+        {
+            title: t('Tags'),
+            href: route('tags.index'),
+            icon: Tag,
         },
 
         {
@@ -261,6 +266,12 @@ export function AppSidebar() {
             productSetupChildren.push({
                 title: t('Categories'),
                 href: route('categories.index')
+            });
+        }
+        if (hasPermission(permissions, 'manage-categories')) {
+            productSetupChildren.push({
+                title: t('Tags'),
+                href: route('tags.index')
             });
         }
         if (productSetupChildren.length > 0) {

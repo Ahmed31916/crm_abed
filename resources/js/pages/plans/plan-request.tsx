@@ -61,6 +61,25 @@ export default function PlanRequestsPage() {
     const permissions = auth?.permissions || [];
 
     // ============================================================
+    // v6.10: التحقق من أن المستخدم سوبر ادمن — إن لم يكن، نُعيد توجيهه
+    // الـ controller يحمي فعلياً، لكن هذا يحسّن UX بعرض شاشة مناسبة
+    // بدلاً من خطأ 403 غامض.
+    // ============================================================
+    const userIsSuperAdmin = (() => {
+        const userType = auth?.user?.type;
+        if (userType && ['superadmin', 'super-admin', 'super_admin'].includes(userType)) {
+            return true;
+        }
+        // fallback: عبر permissions
+        if (Array.isArray(permissions)) {
+            return permissions.includes('manage-plan-requests')
+                && permissions.includes('approve-plan-requests')
+                && permissions.includes('reject-plan-requests');
+        }
+        return false;
+    })();
+
+    // ============================================================
     // State — فلاتر الجدول
     // ============================================================
     const [searchTerm, setSearchTerm] = useState(pageFilters.search || '');
@@ -240,7 +259,9 @@ export default function PlanRequestsPage() {
     const openChangePlanModal = (item: any) => {
         setChangePlanItemId(item.id);
         setChangePlanCurrentId(item.plan?.id ?? null);
-        setNewPlanId(item.plan?.id ? String(item.plan.id) : '');
+        // ⭐ FIX: لا نُهيّئ newPlanId بالقيمة الحالية، بل نتركها فارغة
+        // لتظهر placeholder "Select a plan" ولإخفاء رسالة "same as current"
+        setNewPlanId('');
         setChangePlanOpen(true);
     };
 
@@ -472,6 +493,42 @@ export default function PlanRequestsPage() {
         ? getDisplayUrl(detailsUser.avatar)
         : getDisplayUrl('media/avatars/avatar.png');
 
+    // ============================================================
+    // v6.10: عرض شاشة "Access Denied" إن لم يكن المستخدم سوبر ادمن
+    // (الـ controller يحمي فعلياً، هذا مجرد UX)
+    // ============================================================
+    if (!userIsSuperAdmin) {
+        return (
+            <PageTemplate
+                title={t('Plan Requests')}
+                url="/plan-requests"
+                breadcrumbs={breadcrumbs}
+                noPadding
+            >
+                <div className="bg-white dark:bg-gray-900 rounded-lg shadow p-12 flex flex-col items-center justify-center text-center">
+                    <div className="h-16 w-16 rounded-full bg-red-50 dark:bg-red-900/30 flex items-center justify-center mb-4">
+                        <svg className="h-8 w-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                    </div>
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
+                        {t('Access Denied')}
+                    </h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md">
+                        {t('This page is only accessible to super admins. If you believe this is an error, please contact the system administrator.')}
+                    </p>
+                    <Button
+                        variant="outline"
+                        className="mt-6"
+                        onClick={() => router.get(route('dashboard'))}
+                    >
+                        {t('Back to Dashboard')}
+                    </Button>
+                </div>
+            </PageTemplate>
+        );
+    }
+
     return (
         <PageTemplate
             title={t('Plan Requests')}
@@ -700,8 +757,17 @@ export default function PlanRequestsPage() {
                     </DialogHeader>
 
                     <div className="space-y-4 py-2">
+                        {/* ⭐ تنبيه إذا لم توجد خطط متاحة */}
+                        {(!plans || plans.length === 0) && (
+                            <div className="rounded-md bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
+                                <strong>{t('No plans available.')}</strong>{' '}
+                                {t('Please make sure there are active plans in the system. Contact the administrator if you believe this is an error.')}
+                            </div>
+                        )}
+
                         <div className="space-y-2">
                             <Label htmlFor="new-plan">{t('New Plan')}</Label>
+                            {/* ⭐ FIX: نمرّر plans.length بدلاً من plans فقط، لأن plans قد تكون undefined */}
                             <Select
                                 value={newPlanId}
                                 onValueChange={(v) => setNewPlanId(v)}
@@ -709,8 +775,13 @@ export default function PlanRequestsPage() {
                                 <SelectTrigger id="new-plan">
                                     <SelectValue placeholder={t('Select a plan')} />
                                 </SelectTrigger>
-                                <SelectContent>
-                                    {(plans || []).map((p: any) => (
+                                <SelectContent
+                                    // ⭐ مهم: position popper + sideOffset لتفادي مشكلة الاختفاء داخل Dialog
+                                    position="popper"
+                                    sideOffset={4}
+                                    className="z-[100]"
+                                >
+                                    {(Array.isArray(plans) ? plans : []).map((p: any) => (
                                         <SelectItem key={p.id} value={String(p.id)}>
                                             {p.name}
                                             {p.duration && (
@@ -727,7 +798,8 @@ export default function PlanRequestsPage() {
                             </Select>
                         </div>
 
-                        {changePlanCurrentId && Number(newPlanId) === changePlanCurrentId && newPlanId !== '' && (
+                        {/* ⭐ FIX: الرسالة تظهر فقط عند وجود اختيار فعلي مختلف عن فارغ */}
+                        {newPlanId !== '' && changePlanCurrentId !== null && Number(newPlanId) === changePlanCurrentId && (
                             <p className="text-xs text-amber-600">
                                 {t('Selected plan is the same as the current plan.')}
                             </p>
@@ -744,7 +816,12 @@ export default function PlanRequestsPage() {
                         </Button>
                         <Button
                             onClick={submitChangePlan}
-                            disabled={changePlanSubmitting || !newPlanId || (changePlanCurrentId !== null && Number(newPlanId) === changePlanCurrentId)}
+                            disabled={
+                                changePlanSubmitting
+                                || !newPlanId
+                                || (changePlanCurrentId !== null && Number(newPlanId) === changePlanCurrentId)
+                                || (!plans || plans.length === 0)
+                            }
                         >
                             {changePlanSubmitting ? t('Saving...') : t('Save Changes')}
                         </Button>

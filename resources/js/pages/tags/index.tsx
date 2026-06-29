@@ -642,31 +642,33 @@ export default function TagsPage() {
                                 <Label htmlFor="tag-company">
                                     {t('Assign to Company')}
                                 </Label>
+                                {/* ⭐ FIX: لا يمكن استخدام value="" في Radix Select.
+                                    نستخدم sentinel "__self__" للإشارة إلى "نفسي (السوبر ادمن)". */}
                                 <Select
-                                    value={form.company_id}
-                                    onValueChange={(v) => setForm({ ...form, company_id: v })}
+                                    value={form.company_id || '__self__'}
+                                    onValueChange={(v) => {
+                                        const realValue = v === '__self__' ? '' : v;
+                                        setForm({ ...form, company_id: realValue });
+                                    }}
                                 >
                                     <SelectTrigger id="tag-company">
-                                        <SelectValue placeholder={t('Leave empty for self (super admin)')} />
+                                        <SelectValue placeholder={t('Select owner')} />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="">
+                                        <SelectItem value="__self__">
                                             {t('Myself (Super Admin)')}
                                         </SelectItem>
-                                        {/* قائمة الشركات تُمرَّر من الـ controller إن لزم —
-                                            حالياً يمكن للمستخدم كتابة ID يدوياً،
-                                            أو يمكنك جلب القائمة عبر AJAX */}
                                     </SelectContent>
                                 </Select>
                                 <p className="text-xs text-gray-500">
-                                    {t('Leave empty to assign to yourself as super admin. Otherwise, enter a company ID to create this tag on behalf of that company.')}
+                                    {t('Choose "Myself (Super Admin)" to assign to yourself, or enter a company ID below to create this tag on behalf of that company.')}
                                 </p>
-                                {/* حقل إدخال يدوي للـ company_id — بديل أبسط */}
+                                {/* حقل إدخال يدوي للـ company_id كبديل للـ select */}
                                 <Input
                                     type="number"
                                     value={form.company_id}
                                     onChange={(e) => setForm({ ...form, company_id: e.target.value })}
-                                    placeholder={t('Company ID (optional)')}
+                                    placeholder={t('Or enter Company ID manually')}
                                     className="text-sm"
                                 />
                             </div>

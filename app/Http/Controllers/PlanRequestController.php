@@ -14,11 +14,20 @@ class PlanRequestController extends BaseController
 {
     public function index(Request $request)
     {
+        // ============================================================
+        // v6.10: تقييد الوصول للسوبر ادمن فقط
+        // ============================================================
+        $user = Auth::user();
+        if (!$this->isSuperAdmin($user)) {
+            abort(403, __('Only super admins can access plan requests.'));
+        }
+
         $query = PlanRequest::with(['user', 'plan', 'approver', 'rejector']);
 
-        if (Auth::user()->hasRole('company')) {
-            $query->where('user_id', Auth::user()->id);
-        }
+        // تم إزالة شرط company لأن الصفحة أصبحت للسوبر ادمن فقط
+        // if (Auth::user()->hasRole('company')) {
+        //     $query->where('user_id', Auth::user()->id);
+        // }
 
         // Apply search
         if ($request->has('search') && $request->search) {
@@ -56,7 +65,7 @@ class PlanRequestController extends BaseController
         // ============================================================
         // v6.8: جلب قائمة الخطط لاستخدامها في dropdown تغيير الخطة
         // ============================================================
-        $plans = Plan::where('is_plan_enable', true)
+        $plans = Plan::where('is_plan_enable', 'on')
             ->orderBy('name')
             ->get([
                 'id',
@@ -79,6 +88,11 @@ class PlanRequestController extends BaseController
      */
     public function show(Request $request, $id)
     {
+        // v6.10: تقييد الوصول للسوبر ادمن فقط
+        if (!$this->isSuperAdmin(Auth::user())) {
+            abort(403, __('Only super admins can access plan requests.'));
+        }
+
         $planRequest = PlanRequest::with(['user', 'plan', 'approver', 'rejector'])
             ->findOrFail($id);
 
@@ -144,6 +158,11 @@ class PlanRequestController extends BaseController
 
     public function approve(PlanRequest $planRequest)
     {
+        // v6.10: تقييد الوصول للسوبر ادمن فقط
+        if (!$this->isSuperAdmin(Auth::user())) {
+            abort(403, __('Only super admins can approve plan requests.'));
+        }
+
         $planRequest->update([
             'status'      => 'approved',
             'approved_at' => now(),
@@ -170,6 +189,11 @@ class PlanRequestController extends BaseController
 
     public function reject(PlanRequest $planRequest)
     {
+        // v6.10: تقييد الوصول للسوبر ادمن فقط
+        if (!$this->isSuperAdmin(Auth::user())) {
+            abort(403, __('Only super admins can reject plan requests.'));
+        }
+
         $planRequest->update([
             'status'      => 'rejected',
             'rejected_at' => now(),
@@ -186,6 +210,11 @@ class PlanRequestController extends BaseController
      */
     public function changePlan(Request $request, $id)
     {
+        // v6.10: تقييد الوصول للسوبر ادمن فقط
+        if (!$this->isSuperAdmin(Auth::user())) {
+            abort(403, __('Only super admins can change plan requests.'));
+        }
+
         $planRequest = PlanRequest::with('user')->findOrFail($id);
 
         $validated = $request->validate([
@@ -220,5 +249,32 @@ class PlanRequestController extends BaseController
 
         return redirect()->route('plan-requests.index')
             ->with('success', __('Plan updated successfully!'));
+    }
+
+    /**
+     * Helper: تحديد ما إذا كان المستخدم سوبر ادمن.
+     * v6.10: استخدم نفس منطق التطبيق الموجود.
+     */
+    private function isSuperAdmin($user): bool
+    {
+        if (!$user) return false;
+
+        // أسلوب 1: عبر type
+        if (isset($user->type) && in_array($user->type, ['superadmin', 'super-admin', 'super_admin'], true)) {
+            return true;
+        }
+
+        // أسلوب 2: عبر hasRole إن وُجد (spatie/laravel-permission)
+        if (method_exists($user, 'hasRole')) {
+            try {
+                return $user->hasRole('superadmin')
+                    || $user->hasRole('super-admin')
+                    || $user->hasRole('super_admin');
+            } catch (\Throwable $e) {
+                return false;
+            }
+        }
+
+        return false;
     }
 }
