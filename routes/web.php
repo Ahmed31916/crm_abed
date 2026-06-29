@@ -447,9 +447,38 @@ Route::middleware(['auth', 'verified'])->group(function () {
         });
 
         // Plan Requests routes (placeholder)
-        Route::get('plan-requests', function () {
-            return Inertia::render('plans/plan-requests');
-        })->name('plan-requests.index');
+        // Route::get('plan-requests', function () {
+        //     return Inertia::render('plans/plan-requests');
+        // })->name('plan-requests.index');
+
+            Route::middleware('permission:manage-plan-requests')->group(function () {
+        Route::get('plan-requests', [PlanRequestController::class, 'index'])
+            ->middleware('permission:manage-plan-requests')
+            ->name('plan-requests.index');
+
+            
+        // v6.8: عرض تفاصيل طلب الخطة (license_key, hardware_id, ...)
+        Route::get('plan-requests/{planRequest}', [PlanRequestController::class, 'show'])
+            ->middleware('permission:manage-plan-requests')
+            ->name('plan-requests.show')
+            ->where('planRequest', '[0-9]+');
+
+        // v6.8: تغيير خطة الطلب
+        Route::put('plan-requests/{planRequest}/change-plan', [PlanRequestController::class, 'changePlan'])
+            ->middleware('permission:approve-plan-requests')
+            ->name('plan-requests.change-plan')
+            ->where('planRequest', '[0-9]+');
+
+        Route::post('plan-requests/{planRequest}/approve', [PlanRequestController::class, 'approve'])
+            ->middleware('permission:approve-plan-requests')
+            ->name('plan-requests.approve')
+            ->where('planRequest', '[0-9]+');
+
+        Route::post('plan-requests/{planRequest}/reject', [PlanRequestController::class, 'reject'])
+            ->middleware('permission:reject-plan-requests')
+            ->name('plan-requests.reject')
+            ->where('planRequest', '[0-9]+');
+    });
 
         // Companies routes
         Route::middleware('permission:manage-companies')->group(function () {

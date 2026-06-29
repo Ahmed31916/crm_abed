@@ -49,4 +49,12 @@ return [
         'staging_verify_ssl' => env('VITAL_STAGING_API_VERIFY_SSL', false),
     ],
 
+    'rabbitmq' => [
+        'host' => env('RABBITMQ_HOST'),
+        'port' => env('RABBITMQ_PORT'),
+        'user' => env('RABBITMQ_USER'),
+        'password' => env('RABBITMQ_PASS'),
+        'vhost' => env('RABBITMQ_VHOST'),
+    ],
+
 ];

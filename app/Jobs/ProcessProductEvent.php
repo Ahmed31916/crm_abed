@@ -146,6 +146,9 @@ class ProcessProductEvent implements ShouldQueue
         $channel = null;
 
         try {
+
+
+
             // إنشاء اتصال RabbitMQ
             $connection = new AMQPStreamConnection(
                 config('services.rabbitmq.host', env('RABBITMQ_HOST', 'vitalexperts.co')),
