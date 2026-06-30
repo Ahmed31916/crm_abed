@@ -106,8 +106,7 @@ function MultiSelect({
         }
     };
 
-    const remove = (val: string, e: React.MouseEvent) => {
-        e.stopPropagation();
+    const remove = (val: string) => {
         if (disabled) return;
         onChange(value.filter(v => v !== val));
     };
@@ -118,14 +117,21 @@ function MultiSelect({
 
     return (
         <div ref={containerRef} className="relative">
-            <button
-                type="button"
-                onClick={() => !disabled && setOpen(o => !o)}
-                disabled={disabled}
-                className={`flex w-full items-center justify-between rounded-md border bg-transparent px-3 py-2 text-sm text-left min-h-[40px] transition-colors ${disabled ? 'opacity-50 cursor-not-allowed bg-muted' : 'hover:bg-accent/50'} ${error ? 'border-red-500' : 'border-input'} ${open && !disabled ? 'ring-2 ring-ring ring-offset-1' : ''}`}
+            <div
+                role="combobox"
                 aria-expanded={open}
                 aria-haspopup="listbox"
                 aria-disabled={disabled}
+                tabIndex={disabled ? -1 : 0}
+                onClick={() => !disabled && setOpen(o => !o)}
+                onKeyDown={(e) => {
+                    if (disabled) return;
+                    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setOpen(true);
+                    }
+                }}
+                className={`flex w-full items-center justify-between rounded-md border bg-transparent px-3 py-2 text-sm text-left min-h-[40px] transition-colors outline-none ${disabled ? 'opacity-50 cursor-not-allowed bg-muted' : 'hover:bg-accent/50 cursor-pointer focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1'} ${error ? 'border-red-500' : 'border-input'} ${open && !disabled ? 'ring-2 ring-ring ring-offset-1' : ''}`}
             >
                 <div className="flex flex-wrap items-center gap-1 flex-1 min-w-0">
                     {selectedItems.length === 0 ? (
@@ -147,23 +153,25 @@ function MultiSelect({
                             >
                                 <span className="truncate max-w-[160px]">{item.label}</span>
                                 {!disabled && (
-                                    <span
-                                        role="button"
-                                        tabIndex={0}
-                                        onClick={(e) => remove(item.value, e)}
-                                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); remove(item.value, e as any); } }}
-                                        className="ml-0.5 rounded-full hover:bg-black/10 dark:hover:bg-white/20 p-0.5 cursor-pointer inline-flex"
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            remove(item.value);
+                                        }}
+                                        className="ml-0.5 rounded-full hover:bg-black/10 dark:hover:bg-white/20 p-0.5 cursor-pointer inline-flex items-center justify-center bg-transparent border-0"
                                         aria-label={`Remove ${item.label}`}
                                     >
                                         <X className="h-3 w-3" />
-                                    </span>
+                                    </button>
                                 )}
                             </Badge>
                         ))
                     )}
                 </div>
                 <ChevronDown className={`h-4 w-4 opacity-50 shrink-0 ml-2 transition-transform ${open ? 'rotate-180' : ''}`} />
-            </button>
+            </div>
 
             {open && !disabled && (
                 <div
@@ -500,7 +508,7 @@ export default function ProductEdit() {
                                     {t('Basic Information')}
                                     {isLocked && (
                                         <Badge variant="secondary" className="text-xs font-normal">
-                                            <Lock className="h-3 w-3 mr-1" />
+                                            <Lock className="h-3 mr-1" />
                                             {t('Partial Edit')}
                                         </Badge>
                                     )}
