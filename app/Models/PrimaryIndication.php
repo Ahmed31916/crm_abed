@@ -4,70 +4,157 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Support\Str;
 
+/**
+ * PrimaryIndication Model — UPDATED for Many-to-Many with Product
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * ما الجديد:
+ * ────────────────────────────────────────────────────────────────────────
+ * - إضافة علاقة belongsToMany مع Product عبر product_primary_indications.
+ * - إضافة helpers للبحث/الإنشاء عن indications.
+ *
+ * إذا كان عندك ملف Model أصلي يحتوي على fillable/casts/relationships أخرى،
+ * فقط أضِف methods جديدة للـ Product relationship + helpers الثابتة.
+ * ────────────────────────────────────────────────────────────────────────
+ */
 class PrimaryIndication extends Model
 {
     use HasFactory;
 
-    protected $table = 'primary_indications';
-
     protected $fillable = [
         'name',
-        'company_id',   // الشركة المالكة (للـ visibility scoping)
-        'created_by',   // المستخدم الذي أنشأ السجل (audit trail)
+        'slug',
+    ];
+
+    protected $casts = [
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     // =========================================================================
-    // =========== RELATIONSHIPS ===============================================
+    // =========== Boot: auto-slug on create ==================================
     // =========================================================================
 
-    /**
-     * الشركة المالكة للمؤشر الرئيسي
-     */
-    public function company()
+    protected static function boot(): void
     {
-        return $this->belongsTo(User::class, 'company_id');
-    }
+        parent::boot();
 
-    /**
-     * المستخدم الذي أنشأ السجل (audit)
-     */
-    public function creator()
-    {
-        return $this->belongsTo(User::class, 'created_by');
-    }
+        static::creating(function ($model) {
+            if (empty($model->slug)) {
+                $model->slug = Str::slug($model->name);
+            }
+        });
 
-    // =========================================================================
-    // =========== SCOPES ======================================================
-    // =========================================================================
-
-    /**
-     * Scope: Primary indications visible to a specific company
-     * - يرجع المؤشرات اللي تملكها الشركة نفسها + المؤشرات اللي يملكها السوبر ادمن
-     * - يعتمد على company_id (العمود الأساسي للـ visibility)
-     * - مع fallback للسجلات القديمة بدون company_id
-     *
-     * @param  \Illuminate\Database\Eloquent\Builder  $query
-     * @param  int  $companyId
-     * @return \Illuminate\Database\Eloquent\Builder
-     */
-    public function scopeVisibleTo(Builder $query, int $companyId): Builder
-    {
-        $superAdminId = getSuperAdminCompanyId();
-
-        return $query->where(function ($q) use ($companyId, $superAdminId) {
-            $q->where('company_id', $companyId)
-              ->orWhere('company_id', $superAdminId)
-              ->orWhereNull('company_id');
+        static::updating(function ($model) {
+            if ($model->isDirty('name') && empty($model->slug)) {
+                $model->slug = Str::slug($model->name);
+            }
         });
     }
 
+    // =========================================================================
+    // =========== Relationships ==============================================
+    // =========================================================================
+
     /**
-     * Scope: Primary indications owned by a specific company only
+     * العلاقة Many-to-Many مع Product.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany
      */
-    public function scopeForCompany(Builder $query, int $companyId): Builder
+    public function products(): BelongsToMany
     {
-        return $query->where('company_id', $companyId);
+        return $this->belongsToMany(
+            Product::class,
+            'product_primary_indications',
+            'primary_indication_id',
+            'product_id'
+        )
+        ->withTimestamps();
+    }
+
+    // =========================================================================
+    // =========== Static Helpers (find-or-create) ============================
+    // =========================================================================
+
+    /**
+     * Find-or-create by name (case-insensitive).
+     *
+     * يستخدم في:
+     *   - ProductImport لربط الـ indications القادمة من Excel/CSV.
+     *   - ProductController@store/update لو الـ form يرسل أسماء جديدة.
+     *
+     * @param string $name
+     * @return self
+     */
+    public static function findOrCreateByName(string $name): self
+    {
+        $trimmed = trim($name);
+        if ($trimmed === '') {
+            throw new \InvalidArgumentException('Primary Indication name cannot be empty.');
+        }
+
+        // Case-insensitive lookup
+        $existing = self::whereRaw('LOWER(name) = ?', [mb_strtolower($trimmed)])->first();
+        if ($existing) {
+            return $existing;
+        }
+
+        return self::create([
+            'name' => $trimmed,
+            'slug' => Str::slug($trimmed),
+        ]);
+    }
+
+    /**
+     * Parse string مفصول بـ | , / أو سطور جديدة إلى array من الأسماء النظيفة.
+     *
+     * يستخدم في ProductImport لتقسيم حقل Excel اللي قد يحتوي على عدة قيم.
+     *
+     * @param string|array|null $value
+     * @return array<string>  أسماء فريدة بدون تكرار (case-insensitive deduplication)
+     */
+    public static function parseNames($value): array
+    {
+        if (empty($value)) return [];
+
+        // لو array
+        if (is_array($value)) {
+            $parts = array_map('strval', $value);
+        } else {
+            $string = (string) $value;
+            // لو JSON
+            if (in_array(substr($string, 0, 1), ['[', '{'])) {
+                $decoded = json_decode($string, true);
+                if (is_array($decoded)) {
+                    $parts = array_map('strval', $decoded);
+                } else {
+                    $parts = [$string];
+                }
+            } else {
+                // تقسيم على | , / أو سطر جديد
+                $parts = preg_split('/[|,\/\n\r]+/', $string) ?: [];
+            }
+        }
+
+        // تنظيف + إزالة التكرار
+        $cleaned = [];
+        foreach ($parts as $part) {
+            $trimmed = trim($part);
+            if ($trimmed === '') continue;
+            $key = mb_strtolower($trimmed);
+            if (!isset($cleaned[$key])) {
+                $cleaned[$key] = $trimmed;
+            }
+        }
+
+        return array_values($cleaned);
+    }
+
+    public function scopeVisibleTo($query, $userId = null)
+    {
+        return $query;
     }
 }

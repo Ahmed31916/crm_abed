@@ -281,14 +281,36 @@ export default function ProductEdit() {
     // If a COMPANY user is editing a super admin product, many fields are read-only.
     const isLocked = isSuperAdminProduct && isCompany;
 
+    // ⚡ Pre-compute primary indication map (BEFORE useForm) — needed to convert
+    //    override's names → IDs during form initialization.
+    const primaryIndicationNameToId = (() => {
+        const m = new Map<string, string>();
+        (primaryIndications ?? []).forEach((ind: { id: number; name: string }) => {
+            m.set(ind.name.toLowerCase(), ind.id.toString());
+        });
+        return m;
+    })();
+
     const validMainImageId = product.main_image_id && mainImage ? product.main_image_id : null;
     const validAdditionalImageIds = product.additional_image_ids && additionalImages
         ? product.additional_image_ids.filter((id: number) => additionalImages.some((img: any) => img.id === id))
         : [];
 
+    // Returns the override value if it exists AND is non-empty.
+    // Empty strings, null, undefined, and arrays/objects with no entries
+    // all fall back to the original value. This prevents the UI from showing
+    // "no selection" when a company-edit form saved an empty override field
+    // for category_id or similar.
     const getEffectiveValue = (field: string, originalValue: any) => {
-        if (override && override[field] !== null && override[field] !== undefined) {
-            return override[field];
+        if (override) {
+            const overrideValue = override[field];
+            if (overrideValue !== null && overrideValue !== undefined && overrideValue !== '') {
+                // For arrays, also make sure it's non-empty
+                if (Array.isArray(overrideValue) && overrideValue.length === 0) {
+                    return originalValue;
+                }
+                return overrideValue;
+            }
         }
         return originalValue;
     };
@@ -301,7 +323,12 @@ export default function ProductEdit() {
         detail: product.detail || '',
         price: product.price?.toString() || '',
         sale_price: (isLocked ? getEffectiveValue('sale_price_override', product.sale_price || '') : (product.sale_price?.toString() || ''))?.toString() || '',
-        category_id: getEffectiveValue('category_id', product.category_id?.toString() || ''),
+        category_id: (() => {
+            const v = getEffectiveValue('category_id', product.category_id?.toString() || '');
+            // Normalize: integer IDs come back as numbers from the controller —
+            // convert to string so they match SelectItem value="id.toString()"
+            return v === null || v === undefined ? '' : String(v);
+        })(),
         brand_id: product.brand_id?.toString() || '',
         tax_id: product.tax_id?.toString() || '',
         status: product.status || 'active',
@@ -342,7 +369,32 @@ export default function ProductEdit() {
         pairs_well_with: (product.pairs_well_with_ids || []).map((id: number) => id.toString()),
 
         // ===== Primary Indications =====
-        primary_indications: healthProduct?.primary_indications || [],
+        // ⚡ UPDATED: primary_indications = array of IDs (strings)
+        // - For normal products (super admin or company's own): use product.primary_indications_ids
+        // - For locked products (company editing super admin's): use override->primary_indications (array of names) and convert to IDs
+        primary_indications: (() => {
+            // 1) لو override موجود وعنده primary_indications (array of names)
+            if (isLocked && override?.primary_indications && Array.isArray(override.primary_indications) && override.primary_indications.length > 0) {
+                // حوّل الأسماء إلى IDs
+                return override.primary_indications
+                    .map((name: string) => primaryIndicationNameToId.get(String(name).toLowerCase()))
+                    .filter((id: string | undefined): id is string => !!id);
+            }
+
+            // 2) المنتج عنده primary_indications_ids (array of IDs from controller)
+            if (Array.isArray(product.primary_indications_ids)) {
+                return product.primary_indications_ids.map((id: number) => id.toString());
+            }
+
+            // 3) Fallback: لو الـ healthProduct الحالي لا يزال يرجع أسماء (legacy)
+            if (Array.isArray(healthProduct?.primary_indications)) {
+                return (healthProduct.primary_indications as string[])
+                    .map((name: string) => primaryIndicationNameToId.get(String(name).toLowerCase()))
+                    .filter((id: string | undefined): id is string => !!id);
+            }
+
+            return [] as string[];
+        })(),
 
         // ===== Practitioner / Company Override Exclusive =====
         practitioner_notes: override?.practitioner_notes || '',
@@ -374,10 +426,20 @@ export default function ProductEdit() {
     }, [tags]);
 
     const primaryIndicationOptions: MultiSelectOption[] = useMemo(() => {
+        // ⚡ Changed: value = ID (number as string) instead of name
         return (primaryIndications ?? []).map((ind: { id: number; name: string }) => ({
-            value: ind.name,
+            value: ind.id.toString(),
             label: ind.name,
         }));
+    }, [primaryIndications]);
+
+    // خريطة ID → name لعرض الباجات تحت الـ MultiSelect
+    const primaryIndicationIdToName = useMemo(() => {
+        const m = new Map<string, string>();
+        (primaryIndications ?? []).forEach((ind: { id: number; name: string }) => {
+            m.set(ind.id.toString(), ind.name);
+        });
+        return m;
     }, [primaryIndications]);
 
     const pairsWellWithOptions: MultiSelectOption[] = useMemo(() => {
@@ -508,7 +570,7 @@ export default function ProductEdit() {
                                     {t('Basic Information')}
                                     {isLocked && (
                                         <Badge variant="secondary" className="text-xs font-normal">
-                                            <Lock className="h-3 mr-1" />
+                                            <Lock className="h-3 w-3 mr-1" />
                                             {t('Partial Edit')}
                                         </Badge>
                                     )}
@@ -552,13 +614,25 @@ export default function ProductEdit() {
                                                     <SelectValue placeholder={t('Select Category')} />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    {categories?.map((category: any) => (
-                                                        <SelectItem key={category.id} value={category.id.toString()}>
-                                                            {category.name}
-                                                        </SelectItem>
-                                                    ))}
+                                                    {categories && categories.length > 0 ? (
+                                                        categories.map((category: any) => (
+                                                            <SelectItem key={category.id} value={category.id.toString()}>
+                                                                {category.name}
+                                                            </SelectItem>
+                                                        ))
+                                                    ) : (
+                                                        <div className="px-3 py-2 text-sm text-muted-foreground">
+                                                            {t('No categories available')}
+                                                        </div>
+                                                    )}
                                                 </SelectContent>
                                             </Select>
+                                            {/* Diagnostic hint: show when value is set but not in the list (data integrity issue) */}
+                                            {data.category_id && categories?.length > 0 && !categories.some((c: any) => c.id.toString() === data.category_id) && (
+                                                <p className="text-xs text-amber-600">
+                                                    {t('Selected category (ID')} {data.category_id} {t(') no longer exists. Please choose another.')}
+                                                </p>
+                                            )}
                                             {errors.category_id && <p className="text-xs text-red-500">{errors.category_id}</p>}
                                         </div>
                                     )}
@@ -1002,9 +1076,9 @@ export default function ProductEdit() {
                                     />
                                     {data.primary_indications.length > 0 && (
                                         <div className="flex flex-wrap gap-1 mt-2">
-                                            {data.primary_indications.map((ind: string) => (
-                                                <Badge key={ind} variant="secondary" className="text-xs">
-                                                    {ind}
+                                            {data.primary_indications.map((indId: string) => (
+                                                <Badge key={indId} variant="secondary" className="text-xs">
+                                                    {primaryIndicationIdToName.get(indId) ?? `#${indId}`}
                                                 </Badge>
                                             ))}
                                         </div>

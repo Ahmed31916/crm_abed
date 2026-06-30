@@ -265,6 +265,7 @@ class ProductController extends Controller
             'contraindications' => 'nullable|string|max:2000',
             'research_links'    => 'nullable|string|max:2000',
             'primary_indications' => 'nullable|array',
+            'primary_indications.*' => 'integer|exists:primary_indications,id',
             'dosing_upon_rising'     => 'nullable|string|max:255',
             'dosing_breakfast'       => 'nullable|string|max:255',
             'dosing_between_meals_am'=> 'nullable|string|max:255',
@@ -342,7 +343,6 @@ class ProductController extends Controller
                     'research_links'          => $validated['research_links'] ?? null,
                     'supports'                => $validated['supports'] ?? null,
                     'useful_for'              => $validated['useful_for'] ?? null,
-                    'primary_indications'     => $validated['primary_indications'] ?? [],
                     'dosing_upon_rising'      => $dosingNa ? null : ($validated['dosing_upon_rising'] ?? null),
                     'dosing_breakfast'        => $dosingNa ? null : ($validated['dosing_breakfast'] ?? null),
                     'dosing_between_meals_am' => $dosingNa ? null : ($validated['dosing_between_meals_am'] ?? null),
@@ -353,6 +353,11 @@ class ProductController extends Controller
                     'dosing_na'               => $dosingNa,
                 ]
             );
+
+            // ═══════════════════════════════════════════════════════════════════════
+            // ⚡ NEW: Sync Primary Indications على الـ pivot
+            // ═══════════════════════════════════════════════════════════════════════
+            $product->syncPrimaryIndications($validated['primary_indications'] ?? []);
 
             // ==================== TABLE: product_pairs (pivot) ====================
             if (!empty($validated['pairs_well_with'])) {
@@ -401,7 +406,7 @@ class ProductController extends Controller
 
     public function show($id)
     {
-        $product = Product::with(['category', 'brand', 'tax', 'assignedUser', 'creator', 'media', 'tags', 'healthProduct'])
+        $product = Product::with(['category', 'brand', 'tax', 'assignedUser', 'creator', 'media', 'tags', 'healthProduct', 'primaryIndications'])
             ->whereIn('created_by', getVisibleCompanyIds())
             ->findOrFail($id);
 
@@ -427,6 +432,7 @@ class ProductController extends Controller
             'mainImage' => $product->main_image_url,
             'additionalImages' => $product->additional_image_urls,
             'healthProduct' => $product->healthProduct,
+            'primaryIndications' => $product->primaryIndications,
             'canEdit' => canEditProduct($product),
             'canDelete' => canDeleteProduct($product),
             'isSuperAdminProduct' => $isSuperAdminProduct,
@@ -442,7 +448,7 @@ class ProductController extends Controller
         $currentCompanyId = createdBy();
         $superAdminId = getSuperAdminCompanyId();
 
-        $product = Product::with(['category', 'brand', 'tax', 'assignedUser', 'creator', 'media', 'tags', 'healthProduct'])
+        $product = Product::with(['category', 'brand', 'tax', 'assignedUser', 'creator', 'media', 'tags', 'healthProduct', 'primaryIndications'])
             ->whereIn('created_by', getVisibleCompanyIds())
             ->findOrFail($id);
 
@@ -466,6 +472,7 @@ class ProductController extends Controller
                 'additional_image_ids' => $product->additional_image_ids ?: [],
                 'tags' => $product->tags->map(fn($tag) => ['id' => $tag->id, 'name' => $tag->name])->toArray(),
                 'pairs_well_with_ids' => $product->pairsWellWith->pluck('id')->toArray(),
+                'primary_indications_ids' => $product->primaryIndications->pluck('id')->toArray(),
             ]),
             'categories' => Category::where('created_by', $currentCompanyId)->where('status', 'active')->get(['id', 'name']),
             'brands' => Brand::where('created_by', $currentCompanyId)->where('status', 'active')->get(['id', 'name']),
@@ -546,6 +553,7 @@ class ProductController extends Controller
             'contraindications' => 'nullable|string|max:2000',
             'research_links'    => 'nullable|string|max:2000',
             'primary_indications' => 'nullable|array',
+            'primary_indications.*' => 'integer|exists:primary_indications,id',
             'dosing_upon_rising'     => 'nullable|string|max:255',
             'dosing_breakfast'       => 'nullable|string|max:255',
             'dosing_between_meals_am'=> 'nullable|string|max:255',
@@ -614,7 +622,6 @@ class ProductController extends Controller
                     'research_links'          => $validated['research_links'] ?? null,
                     'supports'                => $validated['supports'] ?? null,
                     'useful_for'              => $validated['useful_for'] ?? null,
-                    'primary_indications'     => $validated['primary_indications'] ?? [],
                     'dosing_upon_rising'      => $dosingNa ? null : ($validated['dosing_upon_rising'] ?? null),
                     'dosing_breakfast'        => $dosingNa ? null : ($validated['dosing_breakfast'] ?? null),
                     'dosing_between_meals_am' => $dosingNa ? null : ($validated['dosing_between_meals_am'] ?? null),
@@ -625,6 +632,11 @@ class ProductController extends Controller
                     'dosing_na'               => $dosingNa,
                 ]
             );
+
+            // ═══════════════════════════════════════════════════════════════════════
+            // ⚡ NEW: Sync Primary Indications على الـ pivot
+            // ═══════════════════════════════════════════════════════════════════════
+            $product->syncPrimaryIndications($validated['primary_indications'] ?? []);
 
             // ===== TABLE: product_pairs =====
             $pairIds = $validated['pairs_well_with'] ?? [];
@@ -679,6 +691,7 @@ class ProductController extends Controller
             'description'              => 'nullable|string',
             'sale_price'               => 'nullable|numeric|min:0',
             'primary_indications'      => 'nullable|array',
+            'primary_indications.*'    => 'integer|exists:primary_indications,id',
             'contraindications'        => 'nullable|string|max:2000',
             'research_links'           => 'nullable|string|max:2000',
             'dosing_upon_rising'       => 'nullable|string|max:255',
@@ -703,11 +716,22 @@ class ProductController extends Controller
             $currentCompanyId = createdBy();
             $dosingNa = $request->boolean('dosing_na');
 
+            // ════════════════════════════════════════════════════════════════════
+            // ⚡ UPDATED: primary_indications override = array of NAMES (not IDs)
+            // ════════════════════════════════════════════════════════════════════
+            $indicationIds = $validated['primary_indications'] ?? [];
+            $indicationNames = [];
+            if (!empty($indicationIds)) {
+                $indicationNames = PrimaryIndication::whereIn('id', $indicationIds)
+                    ->pluck('name')
+                    ->toArray();
+            }
+
             ProductCompanyOverride::updateOrCreate(
                 ['product_id' => $product->id, 'company_id' => $currentCompanyId],
                 [
                     'description'               => $validated['description'] ?? null,
-                    'primary_indications'       => $validated['primary_indications'] ?? [],
+                    'primary_indications'       => $indicationNames,
                     'contraindications'         => $validated['contraindications'] ?? null,
                     'research_links'            => $validated['research_links'] ?? null,
                     'category_id'               => $validated['category_id'],

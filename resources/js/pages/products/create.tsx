@@ -350,10 +350,21 @@ export default function ProductCreate() {
     }, [tags]);
 
     const primaryIndicationOptions: MultiSelectOption[] = useMemo(() => {
+        // ⚡ Changed: value = ID (number as string) instead of name
+        // لأن العلاقة الآن Many-to-Many عبر pivot، نحتاج IDs للـ sync.
         return (primaryIndications ?? []).map((ind: { id: number; name: string }) => ({
-            value: ind.name,
+            value: ind.id.toString(),
             label: ind.name,
         }));
+    }, [primaryIndications]);
+
+    // خريطة ID → name لعرض الباجات تحت الـ MultiSelect
+    const primaryIndicationMap = useMemo(() => {
+        const m = new Map<string, string>();
+        (primaryIndications ?? []).forEach((ind: { id: number; name: string }) => {
+            m.set(ind.id.toString(), ind.name);
+        });
+        return m;
     }, [primaryIndications]);
 
     const pairsWellWithOptions: MultiSelectOption[] = useMemo(() => {
@@ -865,9 +876,9 @@ export default function ProductCreate() {
                                     />
                                     {data.primary_indications.length > 0 && (
                                         <div className="flex flex-wrap gap-1 mt-2">
-                                            {data.primary_indications.map((ind: string) => (
-                                                <Badge key={ind} variant="secondary" className="text-xs">
-                                                    {ind}
+                                            {data.primary_indications.map((indId: string) => (
+                                                <Badge key={indId} variant="secondary" className="text-xs">
+                                                    {primaryIndicationMap.get(indId) ?? `#${indId}`}
                                                 </Badge>
                                             ))}
                                         </div>
