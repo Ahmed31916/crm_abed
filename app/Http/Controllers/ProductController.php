@@ -140,8 +140,10 @@ class ProductController extends Controller
         if (!auth()->user()->isSuperAdmin()) {
             $products->each(function ($product) use ($currentCompanyId) {
                 // FIX: نتجاهل منتجات الشركة الحالية لأنها لا تحتاج override.
-                if (isSuperAdminProduct($product)
-                    && (int) $product->created_by !== (int) $currentCompanyId) {
+                if (
+                    isSuperAdminProduct($product)
+                    && (int) $product->created_by !== (int) $currentCompanyId
+                ) {
                     $override = ProductCompanyOverride::where('product_id', $product->id)
                         ->where('company_id', $currentCompanyId)->first();
                     if ($override) {
@@ -268,9 +270,9 @@ class ProductController extends Controller
             'primary_indications.*' => 'integer|exists:primary_indications,id',
             'dosing_upon_rising'     => 'nullable|string|max:255',
             'dosing_breakfast'       => 'nullable|string|max:255',
-            'dosing_between_meals_am'=> 'nullable|string|max:255',
+            'dosing_between_meals_am' => 'nullable|string|max:255',
             'dosing_lunch'           => 'nullable|string|max:255',
-            'dosing_between_meals_pm'=> 'nullable|string|max:255',
+            'dosing_between_meals_pm' => 'nullable|string|max:255',
             'dosing_dinner'          => 'nullable|string|max:255',
             'dosing_before_sleep'    => 'nullable|string|max:255',
             'dosing_na'              => 'nullable|boolean',
@@ -556,9 +558,9 @@ class ProductController extends Controller
             'primary_indications.*' => 'integer|exists:primary_indications,id',
             'dosing_upon_rising'     => 'nullable|string|max:255',
             'dosing_breakfast'       => 'nullable|string|max:255',
-            'dosing_between_meals_am'=> 'nullable|string|max:255',
+            'dosing_between_meals_am' => 'nullable|string|max:255',
             'dosing_lunch'           => 'nullable|string|max:255',
-            'dosing_between_meals_pm'=> 'nullable|string|max:255',
+            'dosing_between_meals_pm' => 'nullable|string|max:255',
             'dosing_dinner'          => 'nullable|string|max:255',
             'dosing_before_sleep'    => 'nullable|string|max:255',
             'dosing_na'              => 'nullable|boolean',
@@ -707,7 +709,7 @@ class ProductController extends Controller
             'tag_id'                   => 'nullable|array',
             'tag_id.*'                 => 'exists:tags,id',
             'practitioner_notes'       => 'nullable|string|max:5000',
-            'custom_primary_indications'=> 'nullable|array',
+            'custom_primary_indications' => 'nullable|array',
             'custom_dosing_notes'      => 'nullable|string|max:5000',
         ]);
 
@@ -827,11 +829,37 @@ class ProductController extends Controller
         if (!$product || !canEditProduct($product)) {
             return redirect()->back()->with('error', __('Cannot edit this product.'));
         }
-        $product->status = $product->status === 'active' ? 'inactive' : 'active';
-        $product->save();
-        return redirect()->back()->with('success', __('Product status updated.'));
-    }
 
+        try {
+            DB::beginTransaction();
+
+            $product->status = $product->status === 'active' ? 'inactive' : 'active';
+            $product->save();
+
+            // ==================== Dispatch Product Event ====================
+            $toggledProductId = $product->id;
+            $companySlug = $this->getCurrentCompanySlug($product->created_by);
+
+            DB::afterCommit(function () use ($toggledProductId, $companySlug) {
+                \App\Observers\ProductObserver::dispatchProductEvent(
+                    $toggledProductId,
+                    'updated',
+                    [
+                        'company_slug' => $companySlug,
+                        'override_mode' => false,
+                    ]
+                );
+            });
+
+            DB::commit();
+
+            return redirect()->back()->with('success', __('Product status updated.'));
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error("Product toggleStatus failed: " . $e->getMessage());
+            return redirect()->back()->with('error', __('Failed to update product status: :error', ['error' => $e->getMessage()]));
+        }
+    }
     // =========================================================================
     // =========== EXPORT / IMPORT =============================================
     // =========================================================================
@@ -907,7 +935,8 @@ class ProductController extends Controller
             Excel::import($import, $tempFile);
             unlink($tempFile);
             return redirect()->back()->with('success', __('Import completed: :added added, :skipped skipped', [
-                'added' => $import->getAddedCount(), 'skipped' => $import->getSkippedCount()
+                'added' => $import->getAddedCount(),
+                'skipped' => $import->getSkippedCount()
             ]));
         } catch (\Exception $e) {
             return redirect()->back()->with('error', __('Import failed: :error', ['error' => $e->getMessage()]));
@@ -1257,7 +1286,7 @@ class ProductController extends Controller
                             'research_links'     => $researchLinks,
                             'supports'           => $supports,
                             'useful_for'         => $usefulFor,
-                            'primary_indications'=> $primaryIndications,
+                            'primary_indications' => $primaryIndications,
                             'dosing_na'          => $hasDosingData ? false : true,
                         ];
 
@@ -1875,13 +1904,26 @@ class ProductController extends Controller
 
         // قائمة الحقول المسموح بإرجاعها
         $revertibleFields = [
-            'price_override', 'sale_price_override', 'stock_quantity_override',
-            'stock_status_override', 'description', 'contraindications',
-            'research_links', 'category_id', 'primary_indications',
-            'dosing_upon_rising', 'dosing_breakfast', 'dosing_between_meals_am',
-            'dosing_lunch', 'dosing_between_meals_pm', 'dosing_dinner',
-            'dosing_before_sleep', 'dosing_na',
-            'practitioner_notes', 'custom_primary_indications', 'custom_dosing_notes',
+            'price_override',
+            'sale_price_override',
+            'stock_quantity_override',
+            'stock_status_override',
+            'description',
+            'contraindications',
+            'research_links',
+            'category_id',
+            'primary_indications',
+            'dosing_upon_rising',
+            'dosing_breakfast',
+            'dosing_between_meals_am',
+            'dosing_lunch',
+            'dosing_between_meals_pm',
+            'dosing_dinner',
+            'dosing_before_sleep',
+            'dosing_na',
+            'practitioner_notes',
+            'custom_primary_indications',
+            'custom_dosing_notes',
         ];
 
         if (!in_array($fieldName, $revertibleFields)) {
