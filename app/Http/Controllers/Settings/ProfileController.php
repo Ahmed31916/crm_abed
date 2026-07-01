@@ -19,9 +19,17 @@ class ProfileController extends Controller
      */
     public function edit(Request $request): Response
     {
+        // ════════════════════════════════════════════════════════════════════
+        // ⚡ NEW: Eager-load plan + creator (parent company for staff users)
+        // لكي نقدر نبني licenseInfo بدون queries إضافية في الـ view.
+        // ════════════════════════════════════════════════════════════════════
+        $user = $request->user()->load(['plan', 'creator']);
+
         return Inertia::render('settings/profile', [
-            'mustVerifyEmail' => $request->user() instanceof MustVerifyEmail,
+            'mustVerifyEmail' => $user instanceof MustVerifyEmail,
             'status' => $request->session()->get('status'),
+            // ⚡ NEW: licenseInfo — يمرّر بيانات اللايسنس كي لصفحة البروفايل
+            'licenseInfo' => $this->buildLicenseInfo($user),
         ]);
     }
 
@@ -45,7 +53,7 @@ class ProfileController extends Controller
             // Handle avatar upload
             if ($request->hasFile('avatar')) {
                 // Delete old avatar if exists
-                $relativePath=str_replace(url('/storage/media') . '/', '', $request?->user()?->avatar);
+                $relativePath = str_replace(url('/storage/media') . '/', '', $request?->user()?->avatar);
                 if ($request->user()->avatar && check_file($relativePath)) {
                     delete_file($relativePath);
                 }
@@ -77,7 +85,7 @@ class ProfileController extends Controller
         } catch (\Exception $e) {
             \Log::error('Profile update failed', [
                 'error' => $e->getMessage(),
-                'user_id' => $request->user()->id
+                'user_id' => $request->user()->id,
             ]);
 
             return back()->withErrors(['avatar' => 'Failed to update profile. Please try again.']);
@@ -103,5 +111,92 @@ class ProfileController extends Controller
         $request->session()->regenerateToken();
 
         return redirect('/');
+    }
+
+    // =========================================================================
+    // =========== BUILD LICENSE INFO ==========================================
+    // =========================================================================
+    // يبني payload بيانات اللايسنس كي لعرضه في صفحة البروفايل.
+    //
+    // منطق الإظهار:
+    //   - superadmin / admin → show = false (ما عندهم license)
+    //   - company / staff → show = true (حتى لو ما في license_key، نعرض
+    //     الرسالة "No license key assigned yet" مع زر Choose a Plan)
+    //
+    // الحقول المعروضة:
+    //   - status: active | trial | expired | inactive
+    //   - licenseKey: الـ key الفعلي (إن وجد)
+    //   - licenseId: UUID من Vital API
+    //   - planName: اسم الخطة (من relationship plan)
+    //   - issuedTo: company_name || name
+    //   - belongsToCompany: اسم الشركة الأم (للـ staff) أو null (للـ company)
+    //   - subscribedAt: created_at
+    //   - expiresAt: plan_expire_date
+    //   - daysRemaining: الفرق بالأيام (موجب = متبقي، سالب = منتهي)
+    //   - isTrial + trialExpiresAt
+    //   - isActivated: هل hardware_id موجود؟
+    //   - isLegacy: هل المستخدم قديم (استورد license من desktop)؟
+    // =========================================================================
+    private function buildLicenseInfo($user): array
+    {
+        // superadmin و admin ما عندهم license key
+        if ($user->isSuperAdmin() ) {
+            return ['show' => false];
+        }
+
+        $isStaff = $user->type === 'staff';
+        $parentCompany = $isStaff ? $user->creator : null;
+
+        // تحديد الحالة (status)
+        $now = now();
+        $isExpired = $user->plan_expire_date && $user->plan_expire_date < $now;
+        $isTrial = (bool) $user->is_trial;
+        $trialExpired = $isTrial && $user->trial_expire_date && $user->trial_expire_date < $now;
+        $isActive = $user->hasActivePlan();
+
+        $status = 'inactive';
+        if ($isActive) {
+            $status = $isTrial ? 'trial' : 'active';
+        } elseif ($isExpired || $trialExpired) {
+            $status = 'expired';
+        }
+
+        // حساب الأيام المتبقية
+        $expiryDate = $isTrial ? $user->trial_expire_date : $user->plan_expire_date;
+        $daysRemaining = null;
+        if ($expiryDate) {
+            $daysRemaining = (int) $now->diffInDays($expiryDate, false);
+        }
+
+        // اسم الشركة الأم (للـ staff)
+        $belongsToCompany = null;
+        if ($parentCompany) {
+            $belongsToCompany = $parentCompany->company_name ?? $parentCompany->name;
+        }
+
+        // رمز العملة
+        $currencySymbol = function_exists('getSetting') ? getSetting('currency_symbol', '$') : '$';
+
+        return [
+            'show' => true,
+            'status' => $status,
+            'licenseKey' => $user->license_key,
+            'licenseId' => $user->license_id,
+            'planName' => $user->plan?->name,
+            'planPrice' => $user->plan?->price,
+            'planDuration' => $user->plan?->duration,
+            'currencySymbol' => $currencySymbol,
+            'issuedTo' => $user->company_name ?? $user->name,
+            'belongsToCompany' => $belongsToCompany,
+            'subscribedAt' => $user->created_at?->format('Y-m-d'),
+            'expiresAt' => $user->plan_expire_date?->format('Y-m-d'),
+            'daysRemaining' => $daysRemaining,
+            'isTrial' => $isTrial,
+            'trialExpiresAt' => $user->trial_expire_date?->format('Y-m-d'),
+            'isActivated' => !empty($user->hardware_id),
+            'hardwareId' => $user->hardware_id,
+            'isStaff' => $isStaff,
+            'isLegacy' => method_exists($user, 'isLegacyUser') ? $user->isLegacyUser() : false,
+        ];
     }
 }

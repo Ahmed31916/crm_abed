@@ -846,11 +846,20 @@ class ProductController extends Controller
 
     public function downloadTemplate()
     {
-        $filePath = storage_path('uploads/sample/sample-product.xlsx');
+        $filePath = public_path('templates/products-import-template.xlsx');
+
         if (!file_exists($filePath)) {
-            return response()->json(['error' => __('Template not available')], 404);
+            abort(404, __('Import template file not found.'));
         }
-        return response()->download($filePath, 'sample-product.xlsx');
+
+        return response()->download(
+            $filePath,
+            'products-import-template.xlsx',
+            [
+                'Content-Type'        => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'Content-Disposition' => 'attachment; filename="products-import-template.xlsx"',
+            ]
+        );
     }
 
     public function parseFile(Request $request)
