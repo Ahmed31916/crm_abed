@@ -25,7 +25,7 @@ class ProfileController extends Controller
         // ════════════════════════════════════════════════════════════════════
         $user = $request->user()->load(['plan', 'creator']);
 
-        return Inertia::render('settings/profile', [
+        return Inertia::render('settings/profile-settings', [
             'mustVerifyEmail' => $user instanceof MustVerifyEmail,
             'status' => $request->session()->get('status'),
             // ⚡ NEW: licenseInfo — يمرّر بيانات اللايسنس كي لصفحة البروفايل
