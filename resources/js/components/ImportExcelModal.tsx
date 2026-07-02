@@ -1,7 +1,18 @@
 import { useState, useRef } from 'react';
 import { router } from '@inertiajs/react';
 import { useTranslation } from 'react-i18next';
-import { FileSpreadsheet, Upload, X, Info, CheckCircle, AlertTriangle, Download } from 'lucide-react';
+import {
+    FileSpreadsheet,
+    Upload,
+    X,
+    Info,
+    CheckCircle,
+    AlertTriangle,
+    Download,
+    PlusCircle,
+    RefreshCw,
+    MinusCircle,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -10,6 +21,7 @@ import { Progress } from '@/components/ui/progress';
 interface ImportExcelModalProps {
     open: boolean;
     onClose: () => void;
+    children?: React.ReactNode;
 }
 
 interface ImportResult {
@@ -22,7 +34,22 @@ interface ImportResult {
     error_details?: string[];
 }
 
-export default function ImportExcelModal({ open, onClose }: ImportExcelModalProps) {
+/**
+ * ════════════════════════════════════════════════════════════════════
+ * ImportExcelModal
+ * ════════════════════════════════════════════════════════════════════
+ *
+ * Modal لاستيراد المنتجات من ملف Excel.
+ *
+ * الميزات:
+ *   - رفع ملف Excel/CSV
+ *   - إظهار النتيجة (Added / Updated / Skipped) كبطاقات مرئية واضحة
+ *   - شاشة النتيجة لا تختفي إلا عند الضغط على زر Cancel
+ *   - يدعم نتائج مختلطة (إضافة + تعديل مع بعض)
+ *   - إظهار تفاصيل الأخطاء (إن وجدت) في قسم قابل للطي
+ *   - تحديث قائمة المنتجات تلقائياً بعد نجاح الاستيراد (دون إغلاق المودال)
+ */
+export default function ImportExcelModal({ open, onClose, children }: ImportExcelModalProps) {
     const { t } = useTranslation();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -43,6 +70,7 @@ export default function ImportExcelModal({ open, onClose }: ImportExcelModalProp
                 return;
             }
             setSelectedFile(file);
+            // مسح النتيجة السابقة عند اختيار ملف جديد
             setResult(null);
         }
     };
@@ -79,12 +107,18 @@ export default function ImportExcelModal({ open, onClose }: ImportExcelModalProp
             const data: ImportResult = await response.json();
             setResult(data);
 
-            if (data.flag === 'success') {
-                // Reload page after 3 seconds to show new products
-                setTimeout(() => {
-                    router.reload();
-                    handleClose();
-                }, 3000);
+            // ═══════════════════════════════════════════════════════════
+            // تحديث قائمة المنتجات عند نجاح الاستيراد (دون إغلاق المودال)
+            // النتيجة تبقى ظاهرة حتى يضغط المستخدم Cancel
+            // ═══════════════════════════════════════════════════════════
+            if (data.flag === 'success' || (data.imported || 0) > 0 || (data.updated || 0) > 0) {
+                router.reload({ preserveState: true, preserveScroll: true });
+            }
+
+            // تصفية حقل الملف (لكن النتيجة تبقى ظاهرة)
+            setSelectedFile(null);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
             }
         } catch (error) {
             setResult({
@@ -96,6 +130,10 @@ export default function ImportExcelModal({ open, onClose }: ImportExcelModalProp
         }
     };
 
+    /**
+     * زر الإلغاء: يخفي النتيجة + يقفل المودال
+     * (النتيجة لا تختفي إلا بهذا الزر — لا auto-close)
+     */
     const handleClose = () => {
         setSelectedFile(null);
         setResult(null);
@@ -136,7 +174,36 @@ export default function ImportExcelModal({ open, onClose }: ImportExcelModalProp
         { name: 'Primary Indications' },
         { name: 'Custom Primary Indications' },
         { name: 'Custom Dosing Notes' },
+        // ⚡ NEW: frequency column
+        { name: 'Frequency' },
     ];
+
+    // ═══════════════════════════════════════════════════════════
+    // إعدادات العرض حسب نوع النتيجة
+    // ═══════════════════════════════════════════════════════════
+    const resultConfig = {
+        success: {
+            border: 'border-green-200 dark:border-green-800',
+            bg: 'bg-green-50 dark:bg-green-950/30',
+            icon: <CheckCircle className="h-4 w-4 text-green-600" />,
+            title: t('Import Completed Successfully'),
+        },
+        warning: {
+            border: 'border-yellow-200 dark:border-yellow-800',
+            bg: 'bg-yellow-50 dark:bg-yellow-950/30',
+            icon: <AlertTriangle className="h-4 w-4 text-yellow-600" />,
+            title: t('Import Completed with Warnings'),
+        },
+        error: {
+            border: 'border-red-200 dark:border-red-800',
+            bg: 'bg-red-50 dark:bg-red-950/30',
+            icon: <AlertTriangle className="h-4 w-4 text-red-600" />,
+            title: t('Import Failed'),
+        },
+    };
+
+    const config = result ? resultConfig[result.flag] : null;
+    const hasCounts = result && (result.imported !== undefined || result.updated !== undefined || result.skipped !== undefined);
 
     return (
         <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
@@ -147,16 +214,19 @@ export default function ImportExcelModal({ open, onClose }: ImportExcelModalProp
                         {t('Import Products from Excel')}
                     </DialogTitle>
                     <DialogDescription>
-                        {t('Upload an Excel file to import or update products. Products with existing SKUs will be updated.')}
+                        {t('Upload an Excel file to import or update products. Products with existing SKUs will be updated if there are changes.')}
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-4">
+                    {/* children (download template link) */}
+                    {children}
+
                     {/* Info Alert */}
                     <Alert className="border-blue-200 bg-blue-50 dark:bg-blue-950/30">
                         <Info className="h-4 w-4 text-blue-600" />
                         <AlertDescription className="text-blue-700 dark:text-blue-400 text-sm">
-                            {t('Products that already exist (matched by SKU) will be updated. New SKUs will create new products.')}
+                            {t('Products that already exist (matched by SKU) will be updated if any field differs. New SKUs will create new products. If no fields differ, the row will be skipped.')}
                         </AlertDescription>
                     </Alert>
 
@@ -211,52 +281,102 @@ export default function ImportExcelModal({ open, onClose }: ImportExcelModalProp
                         </div>
                     )}
 
-                    {/* Result */}
-                    {result && (
-                        <Alert
-                            className={
-                                result.flag === 'success'
-                                    ? 'border-green-200 bg-green-50 dark:bg-green-950/30'
-                                    : result.flag === 'warning'
-                                    ? 'border-yellow-200 bg-yellow-50 dark:bg-yellow-950/30'
-                                    : 'border-red-200 bg-red-50 dark:bg-red-950/30'
-                            }
-                        >
-                            {result.flag === 'success' ? (
-                                <CheckCircle className="h-4 w-4 text-green-600" />
-                            ) : (
-                                <AlertTriangle className="h-4 w-4 text-red-600" />
-                            )}
-                            <AlertDescription className="space-y-2">
-                                <p className={
-                                    result.flag === 'success'
-                                        ? 'text-green-700 dark:text-green-400 font-medium'
-                                        : 'text-red-700 dark:text-red-400 font-medium'
-                                }>
-                                    {result.msg}
-                                </p>
-                                {(result.imported !== undefined || result.updated !== undefined) && (
-                                    <div className="text-sm space-y-1">
-                                        {result.imported !== undefined && result.imported > 0 && (
-                                            <p className="text-green-600">{t('Imported')}: {result.imported} {t('products')}</p>
-                                        )}
-                                        {result.updated !== undefined && result.updated > 0 && (
-                                            <p className="text-blue-600">{t('Updated')}: {result.updated} {t('products')}</p>
-                                        )}
-                                        {result.skipped !== undefined && result.skipped > 0 && (
-                                            <p className="text-yellow-600">{t('Skipped')}: {result.skipped} {t('products')}</p>
-                                        )}
-                                        {result.errors !== undefined && result.errors > 0 && (
-                                            <p className="text-red-600">{t('Errors')}: {result.errors}</p>
-                                        )}
+                    {/* ═══════════════════════════════════════════════════════════
+                        Result Panel — يبقى ظاهراً حتى يضغط المستخدم Cancel
+                    ═══════════════════════════════════════════════════════════ */}
+                    {result && config && (
+                        <Alert className={`${config.border} ${config.bg}`}>
+                            {config.icon}
+                            <AlertDescription className="space-y-3">
+                                {/* Result Title & Message */}
+                                <div>
+                                    <p className="font-semibold text-sm text-gray-900 dark:text-white">
+                                        {config.title}
+                                    </p>
+                                    <p className="text-sm text-muted-foreground mt-1 break-words">
+                                        {result.msg}
+                                    </p>
+                                </div>
+
+                                {/* ═══ Counts Cards ═══ */}
+                                {hasCounts && (
+                                    <div className="grid grid-cols-3 gap-3">
+                                        {/* Added */}
+                                        <div className="rounded-md bg-white dark:bg-gray-800 p-3 text-center border border-gray-200 dark:border-gray-700">
+                                            <div className="flex items-center justify-center mb-1">
+                                                <PlusCircle className="h-4 w-4 text-green-600 mr-1" />
+                                                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                                                    {t('Added')}
+                                                </span>
+                                            </div>
+                                            <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                                                {result.imported ?? 0}
+                                            </p>
+                                        </div>
+
+                                        {/* Updated */}
+                                        <div className="rounded-md bg-white dark:bg-gray-800 p-3 text-center border border-gray-200 dark:border-gray-700">
+                                            <div className="flex items-center justify-center mb-1">
+                                                <RefreshCw className="h-4 w-4 text-blue-600 mr-1" />
+                                                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                                                    {t('Updated')}
+                                                </span>
+                                            </div>
+                                            <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                                                {result.updated ?? 0}
+                                            </p>
+                                        </div>
+
+                                        {/* Skipped */}
+                                        <div className="rounded-md bg-white dark:bg-gray-800 p-3 text-center border border-gray-200 dark:border-gray-700">
+                                            <div className="flex items-center justify-center mb-1">
+                                                <MinusCircle className="h-4 w-4 text-yellow-600 mr-1" />
+                                                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                                                    {t('Skipped')}
+                                                </span>
+                                            </div>
+                                            <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                                                {result.skipped ?? 0}
+                                            </p>
+                                        </div>
                                     </div>
                                 )}
+
+                                {/* Mixed Result Hints */}
+                                {hasCounts && (result.imported ?? 0) > 0 && (result.updated ?? 0) > 0 && (
+                                    <p className="text-xs text-muted-foreground text-center italic">
+                                        {t('Some products were added and others were updated.')}
+                                    </p>
+                                )}
+                                {hasCounts
+                                    && (result.imported ?? 0) === 0
+                                    && (result.updated ?? 0) === 0
+                                    && (result.skipped ?? 0) > 0
+                                    && (result.errors ?? 0) === 0 && (
+                                    <p className="text-xs text-muted-foreground text-center italic">
+                                        {t('No products were added or updated. All rows were skipped (no changes detected).')}
+                                    </p>
+                                )}
+                                {hasCounts && (result.errors ?? 0) > 0 && (
+                                    <p className="text-xs text-red-600 dark:text-red-400 text-center">
+                                        {t('{{count}} row(s) failed to import. See details below.', { count: result.errors })}
+                                    </p>
+                                )}
+
+                                {/* Error Details (collapsible) */}
                                 {result.error_details && result.error_details.length > 0 && (
-                                    <div className="mt-2 max-h-40 overflow-y-auto text-xs space-y-1">
-                                        {result.error_details.map((err, idx) => (
-                                            <p key={idx} className="text-red-600">{err}</p>
-                                        ))}
-                                    </div>
+                                    <details className="mt-2">
+                                        <summary className="text-xs font-medium text-red-700 dark:text-red-400 cursor-pointer hover:underline">
+                                            {t('View error details')}
+                                        </summary>
+                                        <div className="mt-2 max-h-40 overflow-y-auto rounded bg-red-50 dark:bg-red-900/20 p-2 border border-red-200 dark:border-red-800">
+                                            <ul className="text-xs text-red-700 dark:text-red-300 space-y-1 list-disc list-inside">
+                                                {result.error_details.map((err, idx) => (
+                                                    <li key={idx} className="break-words">{err}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    </details>
                                 )}
                             </AlertDescription>
                         </Alert>

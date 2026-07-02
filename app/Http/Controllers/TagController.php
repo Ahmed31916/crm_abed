@@ -347,7 +347,12 @@ class TagController extends Controller
      */
     public function list(Request $request)
     {
-        $query = Tag::visibleTo(createdBy());
+        $user = Auth::user();
+        $isSuperAdmin = $this->isSuperAdmin($user);
+
+        $query = $isSuperAdmin
+            ? Tag::where('company_id', $user->id)
+            : Tag::visibleTo(createdBy());
 
         if ($request->filled('search')) {
             $query->search($request->search);
@@ -421,9 +426,12 @@ class TagController extends Controller
             $superAdminId = getSuperAdminCompanyId();
             $query->where(function ($q) use ($user, $superAdminId) {
                 $q->where('company_id', $user->id)
-                  ->orWhere('company_id', $superAdminId)
-                  ->orWhereNull('company_id'); // سجلات قديمة
+                ->orWhere('company_id', $superAdminId)
+                ->orWhereNull('company_id'); // سجلات قديمة
             });
+        } else {
+            // السوبر أدمن يرى تاجاته فقط (لا يرى تاجات الشركات)
+            $query->where('company_id', $user->id);
         }
 
         // فلتر الحالة (active/inactive)

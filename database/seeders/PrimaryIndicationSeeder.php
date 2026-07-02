@@ -30,100 +30,10 @@ class PrimaryIndicationSeeder extends Seeder
 
         // قائمة المؤشرات الرئيسية الصحية الشائعة
         $indications = [
-            // ========== الدماغ والأعصاب ==========
-            'Cognitive Support',
-            'Memory Enhancement',
-            'Focus & Mental Clarity',
-            'Mood Balance',
-            'Stress Management',
-            'Anxiety Relief',
-            'Nervous System Support',
-
-            // ========== النوم ==========
-            'Sleep Quality',
-            'Sleep Onset',
-            'Restful Sleep',
-            'Circadian Rhythm Support',
-
-            // ========== الطاقة ==========
-            'Energy Production',
-            'Fatigue Reduction',
-            'Athletic Performance',
-            'Endurance Support',
-            'Recovery Support',
-
-            // ========== المناعة ==========
-            'Immune System Support',
-            'Antioxidant Defense',
-            'Inflammatory Response',
-            'Infection Defense',
-            'Cold & Flu Prevention',
-
-            // ========== الجهاز الهضمي ==========
-            'Digestive Support',
-            'Gut Microbiome',
-            'Bowel Regularity',
-            'Nutrient Absorption',
-            'Liver Support',
-            'Detoxification',
-
-            // ========== القلب والأوعية ==========
-            'Cardiovascular Health',
-            'Blood Circulation',
-            'Blood Pressure Support',
-            'Cholesterol Management',
-            'Vascular Integrity',
-
-            // ========== العظام والمفاصل ==========
-            'Bone Density',
-            'Joint Mobility',
-            'Cartilage Support',
-            'Muscle Function',
-            'Connective Tissue Health',
-
-            // ========== التمثيل الغذائي ==========
-            'Metabolic Support',
-            'Blood Sugar Balance',
-            'Weight Management',
-            'Thyroid Support',
-            'Insulin Sensitivity',
-
-            // ========== الهرمونات ==========
-            'Hormonal Balance',
-            'Adrenal Support',
-            'Menopause Support',
-            'PMS Support',
-            'Testosterone Support',
-
-            // ========== البشرة والشعر ==========
-            'Skin Health',
-            'Collagen Production',
-            'Wound Healing',
-            'Hair Growth',
-            'Nail Strength',
-
-            // ========== التنفس ==========
-            'Respiratory Health',
-            'Sinus Support',
-            'Lung Function',
-            'Bronchial Support',
-
-            // ========== العيون ==========
-            'Eye Health',
-            'Vision Support',
-            'Macular Health',
-
-            // ========== المسالك البولية ==========
-            'Urinary Tract Health',
-            'Kidney Support',
-            'Bladder Health',
-
-            // ========== عام ==========
-            'Overall Wellness',
-            'Anti-Aging',
-            'Cellular Health',
-            'Mitochondrial Support',
-            'Hydration Support',
+            'Nervous System',
+            'Liver / Kidney / Spleen',
+            'Ear / Nose / Throat',
+            'Gut / Brain Axis'
         ];
 
         $inserted = 0;

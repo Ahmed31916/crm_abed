@@ -77,6 +77,16 @@ export function AppSidebar() {
             icon: Tag,
         },
 
+            {
+        title: t('Categories'),
+        href: route('categories.index'),
+        icon: Folder,
+    },
+    {
+        title: t('Brands'),
+        href: route('brands.index'),
+        icon: ShoppingBag,
+    },
         {
             title: t('Currency'),
             href: route('currencies.index'),

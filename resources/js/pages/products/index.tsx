@@ -19,7 +19,7 @@ import { SearchAndFilterBar } from '@/components/ui/search-and-filter-bar';
 
 export default function Products() {
     const { t } = useTranslation();
-    const { auth, products, categories, brands, taxes, users, samplePath, filters: pageFilters = {} } = usePage().props as any;
+    const { auth, products, categories, brands, taxes, users, companies, samplePath, filters: pageFilters = {} } = usePage().props as any;
     const permissions = auth?.permissions || [];
     const isCompany = auth?.user?.type === 'company';
     const isSuperAdmin = auth?.user?.type === 'superadmin';
@@ -37,17 +37,61 @@ export default function Products() {
     const [currentItem, setCurrentItem] = useState<any>(null);
     const [formMode, setFormMode] = useState<'create' | 'edit' | 'view'>('create');
 
+    // ═══════════════════════════════════════════════════════════════
+    // NEW: Ownership & Company filters (Super Admin only)
+    // ═══════════════════════════════════════════════════════════════
+    // ownership: 'all' | 'super_admin' | 'company'
+    //   - 'super_admin': products created by super admin only
+    //   - 'company': products created by any company (not super admin)
+    //   - 'all': no filter
+    //
+    // companyFilter: 'all' | <company_id>
+    //   - Only shown when ownership !== 'super_admin'
+    //   - Further narrows down to a specific company's products
+    // ═══════════════════════════════════════════════════════════════
+    const [selectedOwnership, setSelectedOwnership] = useState(pageFilters.ownership || 'all');
+    const [selectedCompanyFilter, setSelectedCompanyFilter] = useState(pageFilters.company_id || 'all');
+
     const [activeView, setActiveView] = useState<'list' | 'grid'>(pageFilters.view || 'list');
 
     // Check if any filters are active
     const hasActiveFilters = () => {
-        return searchTerm !== '' || selectedCategory !== 'all' || selectedBrand !== 'all' || selectedStatus !== 'all' || selectedAssignee !== 'all';
+        return searchTerm !== ''
+            || selectedCategory !== 'all'
+            || selectedBrand !== 'all'
+            || selectedStatus !== 'all'
+            || selectedAssignee !== 'all'
+            || (isSuperAdmin && selectedOwnership !== 'all')
+            || (isSuperAdmin && selectedCompanyFilter !== 'all');
     };
 
     // Count active filters
     const activeFilterCount = () => {
-        return (selectedCategory !== 'all' ? 1 : 0) + (selectedBrand !== 'all' ? 1 : 0) + (selectedStatus !== 'all' ? 1 : 0) + (selectedAssignee !== 'all' ? 1 : 0);
+        return (selectedCategory !== 'all' ? 1 : 0)
+            + (selectedBrand !== 'all' ? 1 : 0)
+            + (selectedStatus !== 'all' ? 1 : 0)
+            + (selectedAssignee !== 'all' ? 1 : 0)
+            + (isSuperAdmin && selectedOwnership !== 'all' ? 1 : 0)
+            + (isSuperAdmin && selectedOwnership !== 'super_admin' && selectedCompanyFilter !== 'all' ? 1 : 0);
     };
+
+    // ═══════════════════════════════════════════════════════════════
+    // Helper: بناء object الفلاتر المشتركة لكل طلبات router.get
+    // ═══════════════════════════════════════════════════════════════
+    const buildFilterParams = (extra: Record<string, any> = {}) => ({
+        search: searchTerm || undefined,
+        category: selectedCategory !== 'all' ? selectedCategory : undefined,
+        brand: selectedBrand !== 'all' ? selectedBrand : undefined,
+        status: selectedStatus !== 'all' ? selectedStatus : undefined,
+        assigned_to: selectedAssignee !== 'all' ? selectedAssignee : undefined,
+        // فلتر الملكية (فقط للسوبر ادمن)
+        ownership: isSuperAdmin && selectedOwnership !== 'all' ? selectedOwnership : undefined,
+        // فلتر الشركة (فقط للسوبر ادمن + لما لا يكون ownership = super_admin)
+        company_id: isSuperAdmin && selectedOwnership !== 'super_admin' && selectedCompanyFilter !== 'all'
+            ? selectedCompanyFilter
+            : undefined,
+        ...extra,
+    });
 
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
@@ -58,11 +102,7 @@ export default function Products() {
         router.get(route('products.index'), {
             view: activeView,
             page: 1,
-            search: searchTerm || undefined,
-            category: selectedCategory !== 'all' ? selectedCategory : undefined,
-            brand: selectedBrand !== 'all' ? selectedBrand : undefined,
-            status: selectedStatus !== 'all' ? selectedStatus : undefined,
-            assigned_to: selectedAssignee !== 'all' ? selectedAssignee : undefined,
+            ...buildFilterParams(),
             ...(parseInt(pageFilters.per_page) !== 10 && pageFilters.per_page && { per_page: pageFilters.per_page })
         }, { preserveState: true, preserveScroll: true });
     };
@@ -74,11 +114,7 @@ export default function Products() {
             sort_field: field,
             sort_direction: direction,
             page: 1,
-            search: searchTerm || undefined,
-            category: selectedCategory !== 'all' ? selectedCategory : undefined,
-            brand: selectedBrand !== 'all' ? selectedBrand : undefined,
-            status: selectedStatus !== 'all' ? selectedStatus : undefined,
-            assigned_to: selectedAssignee !== 'all' ? selectedAssignee : undefined,
+            ...buildFilterParams(),
             ...(parseInt(pageFilters.per_page) !== 10 && pageFilters.per_page && { per_page: pageFilters.per_page })
         }, { preserveState: true, preserveScroll: true });
     };
@@ -210,12 +246,25 @@ export default function Products() {
         setSelectedBrand('all');
         setSelectedStatus('all');
         setSelectedAssignee('all');
+        setSelectedOwnership('all');
+        setSelectedCompanyFilter('all');
         setShowFilters(false);
 
         router.get(route('products.index'), {
             page: 1,
             per_page: pageFilters.per_page
         }, { preserveState: true, preserveScroll: true });
+    };
+
+    // ═══════════════════════════════════════════════════════════════
+    // Handler خاص بفلتر الملكية: عند اختيار "super_admin" نصفر فلتر الشركة
+    // ═══════════════════════════════════════════════════════════════
+    const handleOwnershipChange = (value: string) => {
+        setSelectedOwnership(value);
+        // لو اختار منتجات السوبر ادمن، نصفر فلتر الشركة لأنه ما بيفرش
+        if (value === 'super_admin') {
+            setSelectedCompanyFilter('all');
+        }
     };
 
     // Define page actions
@@ -277,6 +326,10 @@ export default function Products() {
                 const mainImage = row.media?.find((m: any) => m.collection_name === 'main');
                 const imageUrl = mainImage?.original_url || row.display_image_url || row.main_image_url || row.image;
 
+                // تحديد نوع المنتج للسوبر ادمن (سوبر ادمن vs شركة)
+                const superAdminId = auth?.user?.id;
+                const isSuperAdminProduct = row.created_by === superAdminId;
+
                 return (
                     <div className="flex items-center gap-3">
                         <div className="h-12 w-12 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden p-1">
@@ -298,8 +351,32 @@ export default function Products() {
                             <Package className="h-6 w-6 text-gray-400 hidden" />
                         </div>
                         <div>
-                            <div className="font-semibold text-gray-900 dark:text-white">{row.name}</div>
+                            <div className="flex items-center gap-2">
+                                <span className="font-semibold text-gray-900 dark:text-white">{row.name}</span>
+                                {/* ═══════════════════════════════════════════════════════════
+                                    Badge يُظهر نوع المنتج للسوبر ادمن فقط
+                                    ═══════════════════════════════════════════════════════════ */}
+                                {isSuperAdmin && (
+                                    isSuperAdminProduct ? (
+                                        <span className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-600/20">
+                                            {t('Super Admin')}
+                                        </span>
+                                    ) : (
+                                        <span className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium bg-cyan-50 text-cyan-700 ring-1 ring-inset ring-cyan-600/20">
+                                            {t('Company')}
+                                        </span>
+                                    )
+                                )}
+                            </div>
                             <div className="text-sm text-gray-500 dark:text-gray-400">SKU: {row.sku}</div>
+                            {/* ═══════════════════════════════════════════════════════════
+                                اسم الشركة المنشئة للمنتج (للسوبر ادمن فقط)
+                                ═══════════════════════════════════════════════════════════ */}
+                            {isSuperAdmin && row.creator && (
+                                <div className="text-xs text-gray-400 dark:text-gray-500">
+                                    {t('by')}: {row.creator.name}
+                                </div>
+                            )}
                         </div>
                     </div>
                 );
@@ -414,6 +491,23 @@ export default function Products() {
         { value: 'inactive', label: t('Inactive') }
     ];
 
+    // ═══════════════════════════════════════════════════════════════
+    // NEW: Ownership & Company filter options (Super Admin only)
+    // ═══════════════════════════════════════════════════════════════
+    const ownershipOptions = [
+        { value: 'all', label: t('All Products') },
+        { value: 'super_admin', label: t('Super Admin Products') },
+        { value: 'company', label: t('Company Products') },
+    ];
+
+    const companyFilterOptions = [
+        { value: 'all', label: t('All Companies') },
+        ...(companies || []).map((company: any) => ({
+            value: company.id.toString(),
+            label: company.name
+        }))
+    ];
+
     return (
         <PageTemplate
             title={t("Products")}
@@ -429,6 +523,32 @@ export default function Products() {
                     onSearchChange={setSearchTerm}
                     onSearch={handleSearch}
                     filters={[
+                        // ═══════════════════════════════════════════════════════════
+                        // NEW: Ownership filter — Super Admin only
+                        // ═══════════════════════════════════════════════════════════
+                        ...(isSuperAdmin ? [{
+                            name: 'ownership',
+                            label: t('Ownership'),
+                            type: 'select',
+                            value: selectedOwnership,
+                            onChange: handleOwnershipChange,
+                            options: ownershipOptions
+                        }] : []),
+                        // ═══════════════════════════════════════════════════════════
+                        // NEW: Company filter — Super Admin only
+                        // يظهر فقط لما ownership != 'super_admin'
+                        // ═══════════════════════════════════════════════════════════
+                        ...(isSuperAdmin && selectedOwnership !== 'super_admin' ? [{
+                            name: 'company_id',
+                            label: t('Company'),
+                            type: 'select',
+                            value: selectedCompanyFilter,
+                            onChange: setSelectedCompanyFilter,
+                            options: companyFilterOptions
+                        }] : []),
+                        // ═══════════════════════════════════════════════════════════
+                        // Existing filters
+                        // ═══════════════════════════════════════════════════════════
                         {
                             name: 'category',
                             label: t('Category'),
@@ -480,11 +600,7 @@ export default function Products() {
                             view: activeView,
                             page: 1,
                             per_page: parseInt(value),
-                            search: searchTerm || undefined,
-                            category: selectedCategory !== 'all' ? selectedCategory : undefined,
-                            brand: selectedBrand !== 'all' ? selectedBrand : undefined,
-                            status: selectedStatus !== 'all' ? selectedStatus : undefined,
-                            assigned_to: selectedAssignee !== 'all' ? selectedAssignee : undefined
+                            ...buildFilterParams(),
                         }, { preserveState: true, preserveScroll: true });
                     }}
                     showViewToggle={true}
@@ -494,11 +610,7 @@ export default function Products() {
                         router.get(route('products.index'), {
                             view,
                             page: pageFilters.page || 1,
-                            search: searchTerm || undefined,
-                            category: selectedCategory !== 'all' ? selectedCategory : undefined,
-                            brand: selectedBrand !== 'all' ? selectedBrand : undefined,
-                            status: selectedStatus !== 'all' ? selectedStatus : undefined,
-                            assigned_to: selectedAssignee !== 'all' ? selectedAssignee : undefined,
+                            ...buildFilterParams(),
                             sort_field: pageFilters.sort_field || undefined,
                             sort_direction: pageFilters.sort_direction || undefined,
                             ...(parseInt(pageFilters.per_page) !== 10 && pageFilters.per_page && { per_page: pageFilters.per_page })
@@ -575,13 +687,31 @@ export default function Products() {
                                     })()}
 
                                     {/* Status Badge */}
-                                    <div className="absolute top-3 left-3">
+                                    <div className="absolute top-3 left-3 flex flex-col gap-1">
                                         <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${product.status === 'active'
                                                 ? 'bg-green-50 text-green-700 ring-1 ring-inset ring-green-600/20'
                                                 : 'bg-red-50 text-red-700 ring-1 ring-inset ring-red-600/20'
                                             }`}>
                                             {product.status === 'active' ? t('Active') : t('Inactive')}
                                         </span>
+                                        {/* ═══════════════════════════════════════════════════════════
+                                            Badge نوع المنتج (للسوبر ادمن فقط) في الـ Grid View
+                                            ═══════════════════════════════════════════════════════════ */}
+                                        {isSuperAdmin && (
+                                            (() => {
+                                                const superAdminId = auth?.user?.id;
+                                                const isSuperAdminProduct = product.created_by === superAdminId;
+                                                return isSuperAdminProduct ? (
+                                                    <span className="inline-flex items-center rounded-md px-2 py-1 text-[10px] font-medium bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-600/20">
+                                                        {t('Super Admin')}
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center rounded-md px-2 py-1 text-[10px] font-medium bg-cyan-50 text-cyan-700 ring-1 ring-inset ring-cyan-600/20">
+                                                        {t('Company')}
+                                                    </span>
+                                                );
+                                            })()
+                                        )}
                                     </div>
 
                                     {/* Actions dropdown */}
@@ -629,6 +759,12 @@ export default function Products() {
                                     <div>
                                         <h3 className="font-semibold text-gray-900 dark:text-white text-sm line-clamp-2 mb-1">{product.name}</h3>
                                         <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">{product.sku}</p>
+                                        {/* اسم الشركة المنشئة (للسوبر ادمن فقط) */}
+                                        {isSuperAdmin && product.creator && (
+                                            <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                                                {t('by')}: {product.creator.name}
+                                            </p>
+                                        )}
                                     </div>
 
                                     {/* Price & Stock */}
@@ -777,7 +913,9 @@ export default function Products() {
                 entityName={t('product')}
             />
 
-            {/* Import from Excel Modal - Super Admin Only */}
+            {/* ═══════════════════════════════════════════════════════════════
+                Import from Excel Modal - Super Admin Only
+            ═══════════════════════════════════════════════════════════════ */}
             {isSuperAdmin && (
                 <ImportExcelModal
                     open={isImportExcelModalOpen}
@@ -790,7 +928,7 @@ export default function Products() {
                             </svg>
                             <div className="flex-1">
                                 <p className="text-sm text-blue-800 font-medium mb-1">
-                                    يمكنك تنزيل قالب الاستيراد لكي تجعل بياناتك شبيهة بالقالب المرفق.
+                                    {t('You can download the import template to match your data with the provided template.')}
                                 </p>
                                 <a
                                     href={route('product.download.template')}
@@ -799,7 +937,7 @@ export default function Products() {
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
                                     </svg>
-                                    تنزيل قالب الاستيراد (Excel)
+                                    {t('Download Import Template (Excel)')}
                                 </a>
                             </div>
                         </div>
