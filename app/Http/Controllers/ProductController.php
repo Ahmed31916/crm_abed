@@ -22,64 +22,6 @@ use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Maatwebsite\Excel\Facades\Excel;
 
-/**
- * ProductController - Updated with HealthProduct, Tags, Dosing, Override support
- *
- * ╔══════════════════════════════════════════════════════════════════════╗
- * ║  FIELD STORAGE MAP - أي حقل يروح على أي جدول                      ║
- * ╠══════════════════════════════════════════════════════════════════════╣
- * ║                                                                    ║
- * ║  TABLE: products                                                   ║
- * ║  ├── name, slug, sku, description, specification, detail          ║
- * ║  ├── price, sale_price                                            ║
- * ║  ├── product_weight, tax_id, tax_status                            ║
- * ║  ├── category_id, brand_id, frequency                              ║
- * ║  ├── status                                                        ║
- * ║  ├── created_by, assigned_to                                       ║
- * ║  └── main_image_id, additional_image_ids (Spatie MediaLibrary)     ║
- * ║                                                                    ║
- * ║  TABLE: health_products                                            ║
- * ║  ├── product_id, created_by                                        ║
- * ║  ├── sku (product_sku in form), product_form, bottle_size          ║
- * ║  ├── bottle_size_unit (auto: Liquid→oz, Caps→caps)                ║
- * ║  ├── product_image_url, full_name                                  ║
- * ║  ├── ingredients, contraindications, research_links                ║
- * ║  ├── supports, useful_for, primary_indications (JSON)              ║
- * ║  ├── dosing_upon_rising..dosing_before_sleep (7 fields)            ║
- * ║  └── dosing_na (boolean)                                           ║
- * ║                                                                    ║
- * ║  TABLE: tags                                                       ║
- * ║  └── id, name, slug, color, status, company_id                     ║
- * ║                                                                    ║
- * ║  TABLE: primary_indications                                        ║
- * ║  └── id, name, company_id                                          ║
- * ║                                                                    ║
- * ║  TABLE: product_tags (pivot)                                       ║
- * ║  └── product_id, tag_id, created_by                                ║
- * ║                                                                    ║
- * ║  TABLE: product_pairs (pivot)                                      ║
- * ║  └── product_id, paired_product_id, created_by                     ║
- * ║                                                                    ║
- * ║  TABLE: product_company_overrides                                  ║
- * ║  ├── product_id, company_id, is_visible                            ║
- * ║  ├── price_override, sale_price_override                           ║
- * ║  ├── stock_quantity_override, stock_status_override                 ║
- * ║  ├── description, contraindications, research_links                ║
- * ║  ├── category_id, primary_indications (JSON)                       ║
- * ║  ├── dosing_upon_rising..dosing_before_sleep, dosing_na            ║
- * ║  ├── practitioner_notes, custom_primary_indications (JSON)         ║
- * ║  └── custom_dosing_notes                                           ║
- * ╚══════════════════════════════════════════════════════════════════════╝
- *
- * REQUIRED MIGRATION: 2026_01_01_000010_add_missing_product_fields_and_pairs_table.php
- * This migration adds: specification, detail,
- * product_weight, tax_status, frequency, slug
- * to the products table + creates product_pairs table.
- *
- * REQUIRED MIGRATIONS (added):
- *  - 2026_06_16_000001_create_tags_table.php (with company_id)
- *  - 2026_06_16_000002_create_primary_indications_table.php (with company_id)
- */
 class ProductController extends Controller
 {
     // =========================================================================
@@ -92,7 +34,7 @@ class ProductController extends Controller
         $visibleCompanyIds = getVisibleCompanyIds();
 
         $query = Product::query()
-            ->with(['category', 'brand', 'tax', 'assignedUser', 'media', 'tags', 'healthProduct'])
+            ->with(['category', 'brand', 'tax', 'assignedUser', 'creator', 'media', 'tags', 'healthProduct'])
             ->whereIn('created_by', $visibleCompanyIds);
 
         if (!auth()->user()->isSuperAdmin()) {
@@ -124,6 +66,19 @@ class ProductController extends Controller
                 $q->where('tags.id', $request->tag);
             });
         }
+
+        // ═══════════════════════════════════════════════════════════════
+        // ⚡ NEW: فلتر الملكية (ownership) — للسوبر ادمن فقط
+        // ═══════════════════════════════════════════════════════════════
+        if (auth()->user()->isSuperAdmin() && $request->filled('ownership') && $request->ownership !== 'all') {
+            $superAdminId = getSuperAdminCompanyId();
+            if ($request->ownership === 'super_admin') {
+                $query->where('created_by', $superAdminId);
+            } elseif ($request->ownership === 'company') {
+                $query->where('created_by', '!=', $superAdminId);
+            }
+        }
+
         if (auth()->user()->isSuperAdmin() && $request->filled('company_id') && $request->company_id !== 'all') {
             $query->where('created_by', $request->company_id);
         }
@@ -136,10 +91,8 @@ class ProductController extends Controller
 
         $products = $query->paginate($request->get('per_page', 10));
 
-        // Apply company overrides for non-super-admin users
         if (!auth()->user()->isSuperAdmin()) {
             $products->each(function ($product) use ($currentCompanyId) {
-                // FIX: نتجاهل منتجات الشركة الحالية لأنها لا تحتاج override.
                 if (
                     isSuperAdminProduct($product)
                     && (int) $product->created_by !== (int) $currentCompanyId
@@ -182,7 +135,11 @@ class ProductController extends Controller
             ] : null,
             'isSuperAdmin' => auth()->user()->isSuperAdmin(),
             'superAdminCompanyId' => getSuperAdminCompanyId(),
-            'filters' => $request->all(['search', 'category', 'brand', 'status', 'stock_status', 'tag', 'company_id', 'sort_field', 'sort_direction', 'per_page', 'page']),
+            'filters' => $request->all([
+                'search', 'category', 'brand', 'status', 'stock_status', 'tag',
+                'company_id', 'ownership',
+                'sort_field', 'sort_direction', 'per_page', 'page'
+            ]),
         ]);
     }
 
@@ -198,8 +155,6 @@ class ProductController extends Controller
 
         $currentCompanyId = createdBy();
         $superAdminId = getSuperAdminCompanyId();
-
-        // FIX: عرض categories + brands سوبر ادمن + الشركة (مش بس الشركة)
         $visibleCompanyIds = [$currentCompanyId, $superAdminId];
 
         return Inertia::render('products/create', [
@@ -235,11 +190,10 @@ class ProductController extends Controller
         }
 
         $validated = $request->validate([
-            // ===== TABLE: products =====
             'name'              => 'required|string|max:255',
             'description'       => 'nullable|string',
-            'specification'     => 'nullable|string',     // ← products.specification
-            'detail'            => 'nullable|string',     // ← products.detail
+            'specification'     => 'nullable|string',
+            'detail'            => 'nullable|string',
             'price'             => 'required|numeric|min:0',
             'sale_price'        => 'nullable|numeric|min:0',
             'category_id'       => 'required|exists:categories,id',
@@ -252,13 +206,10 @@ class ProductController extends Controller
             'main_image_id'     => 'nullable|exists:media,id',
             'additional_image_ids' => 'nullable|array',
             'additional_image_ids.*' => 'exists:media,id',
-
-            // ===== TABLE: health_products (via product_sku) =====
             'product_sku'       => 'required|string|max:255',
-
-            // ===== TABLE: health_products =====
             'product_form'      => 'required|in:Liquid,Caps',
             'bottle_size'       => 'required|numeric|min:0',
+            'bottle_size_unit'  => 'nullable|string|max:50',
             'product_image_url' => 'nullable|url|max:500',
             'full_name'         => 'nullable|string|max:500',
             'supports'          => 'nullable|string|max:1000',
@@ -276,16 +227,10 @@ class ProductController extends Controller
             'dosing_dinner'          => 'nullable|string|max:255',
             'dosing_before_sleep'    => 'nullable|string|max:255',
             'dosing_na'              => 'nullable|boolean',
-
-            // ===== TABLE: product_tags (pivot) =====
             'tag_id'            => 'required|array|min:1',
             'tag_id.*'          => 'exists:tags,id',
-
-            // ===== TABLE: product_pairs (pivot) =====
             'pairs_well_with'   => 'nullable|array',
             'pairs_well_with.*' => 'exists:products,id',
-
-            // ===== TABLE: product_company_overrides =====
             'practitioner_notes'         => 'nullable|string|max:5000',
             'custom_primary_indications' => 'nullable|array',
             'custom_dosing_notes'        => 'nullable|string|max:5000',
@@ -297,7 +242,6 @@ class ProductController extends Controller
             $currentCompanyId = createdBy();
             $dosingNa = $request->boolean('dosing_na');
 
-            // ==================== TABLE: products ====================
             $product = new Product();
             $product->name = $validated['name'];
             $product->slug = \Illuminate\Support\Str::slug($validated['name']);
@@ -327,17 +271,19 @@ class ProductController extends Controller
                 $product->save();
             }
 
-            // ==================== TABLE: product_tags (pivot) ====================
-            $this->saveTagsToPivot($product->id, $validated['tag_id'], $currentCompanyId);
+            // ===== Tags =====
+            $validTagIds = $this->filterValidTagIds($validated['tag_id'], $currentCompanyId);
+            $this->saveTagsToPivot($product->id, $validTagIds, $currentCompanyId);
 
-            // ==================== TABLE: health_products ====================
+            // ===== Health Product =====
+            $bottleSizeUnit = $validated['bottle_size_unit'] ?? (($validated['product_form'] == 'Liquid') ? 'oz' : 'caps');
             HealthProduct::updateOrCreate(
                 ['product_id' => $product->id, 'created_by' => $currentCompanyId],
                 [
                     'sku'                     => $validated['product_sku'],
                     'product_form'            => $validated['product_form'],
                     'bottle_size'             => $validated['bottle_size'],
-                    'bottle_size_unit'        => ($validated['product_form'] == 'Liquid') ? 'oz' : 'caps',
+                    'bottle_size_unit'        => $bottleSizeUnit,
                     'product_image_url'       => $validated['product_image_url'] ?? null,
                     'full_name'               => $validated['full_name'] ?? null,
                     'ingredients'             => $validated['ingredients'] ?? null,
@@ -353,32 +299,30 @@ class ProductController extends Controller
                     'dosing_dinner'           => $dosingNa ? null : ($validated['dosing_dinner'] ?? null),
                     'dosing_before_sleep'     => $dosingNa ? null : ($validated['dosing_before_sleep'] ?? null),
                     'dosing_na'               => $dosingNa,
+                    'practitioner_notes'         => $validated['practitioner_notes'] ?? null,
+                    'custom_primary_indications' => $validated['custom_primary_indications'] ?? [],
+                    'custom_dosing_notes'        => $validated['custom_dosing_notes'] ?? null,
                 ]
             );
 
-            // ═══════════════════════════════════════════════════════════════════════
-            // ⚡ NEW: Sync Primary Indications على الـ pivot
-            // ═══════════════════════════════════════════════════════════════════════
+            // ===== Primary Indications Pivot =====
             $product->syncPrimaryIndications($validated['primary_indications'] ?? []);
 
-            // ==================== TABLE: product_pairs (pivot) ====================
+            // ===== Pairs Well With =====
             if (!empty($validated['pairs_well_with'])) {
                 $this->syncPairsWellWith($product->id, $validated['pairs_well_with'], $currentCompanyId);
             }
 
-            // ==================== TABLE: product_company_overrides ====================
+            // ===== Override (custom fields only) =====
+            // ملاحظة: practitioner_notes و custom_* انتقلت لـ health_products
+            // لكن ننشئ سجل override فارغ للحفاظ على is_visible
             ProductCompanyOverride::updateOrCreate(
                 ['product_id' => $product->id, 'company_id' => $currentCompanyId],
                 [
-                    'practitioner_notes'         => $validated['practitioner_notes'] ?? null,
-                    'custom_primary_indications' => $validated['custom_primary_indications'] ?? [],
-                    'custom_dosing_notes'        => $validated['custom_dosing_notes'] ?? null,
-                    'is_visible'                 => true,
+                    'is_visible' => true,
                 ]
             );
 
-            // ==================== Dispatch Product Event ====================
-            // FIX: نُرفق slug الشركة التي أنشأت المنتج.
             $createdProductId = $product->id;
             $companySlug = $this->getCurrentCompanySlug($currentCompanyId);
             DB::afterCommit(function () use ($createdProductId, $companySlug) {
@@ -413,8 +357,6 @@ class ProductController extends Controller
             ->findOrFail($id);
 
         $currentCompanyId = createdBy();
-        // FIX: نطبّق نفس منطق edit()/update() هنا لتجنب اعتبار منتجات الشركة
-        // نفسها كمنتجات سوبر ادمن.
         $isSuperAdminProduct = isSuperAdminProduct($product)
             && (int) $product->created_by !== (int) $currentCompanyId;
 
@@ -456,7 +398,6 @@ class ProductController extends Controller
 
         $isSuperAdminProduct = isSuperAdminProduct($product);
 
-        // Load override data
         $override = ProductCompanyOverride::where('product_id', $product->id)
             ->where('company_id', $currentCompanyId)
             ->first();
@@ -511,11 +452,6 @@ class ProductController extends Controller
         }
 
         $currentCompanyId = createdBy();
-        // ════════════════════════════════════════════════════════════════════
-        // FIX: نطبّق نفس منطق دالة edit() — المنتج يُعتبر "سوبر ادمن" فقط
-        // إذا كان منشأ من شركة أخرى غير الشركة الحالية. هذا يمنع توجيه
-        // تحديث منتج الشركة نفسه إلى مسار updateOverride() بالخطأ.
-        // ════════════════════════════════════════════════════════════════════
         $isSuperAdminProduct = isSuperAdminProduct($product)
             && (int) $product->created_by !== (int) $currentCompanyId;
 
@@ -526,7 +462,6 @@ class ProductController extends Controller
 
         // ===== Full update (own product or super admin editing) =====
         $validated = $request->validate([
-            // TABLE: products
             'name'              => 'required|string|max:255',
             'description'       => 'nullable|string',
             'specification'     => 'nullable|string',
@@ -543,10 +478,10 @@ class ProductController extends Controller
             'main_image_id'     => 'nullable|exists:media,id',
             'additional_image_ids' => 'nullable|array',
             'additional_image_ids.*' => 'exists:media,id',
-            // TABLE: health_products
             'product_sku'       => 'required|string|max:255',
             'product_form'      => 'required|in:Liquid,Caps',
             'bottle_size'       => 'required|numeric|min:0',
+            'bottle_size_unit'  => 'nullable|string|max:50',
             'product_image_url' => 'nullable|url|max:500',
             'full_name'         => 'nullable|string|max:500',
             'supports'          => 'nullable|string|max:1000',
@@ -564,13 +499,10 @@ class ProductController extends Controller
             'dosing_dinner'          => 'nullable|string|max:255',
             'dosing_before_sleep'    => 'nullable|string|max:255',
             'dosing_na'              => 'nullable|boolean',
-            // TABLE: product_tags
             'tag_id'            => 'required|array|min:1',
             'tag_id.*'          => 'exists:tags,id',
-            // TABLE: product_pairs
             'pairs_well_with'   => 'nullable|array',
             'pairs_well_with.*' => 'exists:products,id',
-            // TABLE: product_company_overrides
             'practitioner_notes'         => 'nullable|string|max:5000',
             'custom_primary_indications' => 'nullable|array',
             'custom_dosing_notes'        => 'nullable|string|max:5000',
@@ -583,7 +515,6 @@ class ProductController extends Controller
             // ===== TABLE: products =====
             $product->name = $validated['name'];
             $product->slug = \Illuminate\Support\Str::slug($validated['name']);
-            // SKU NOT updated on products table (read-only after creation)
             $product->description = $validated['description'] ?? null;
             $product->specification = $validated['specification'] ?? null;
             $product->detail = $validated['detail'] ?? null;
@@ -606,17 +537,35 @@ class ProductController extends Controller
 
             $product->saveQuietly();
 
-            // ===== TABLE: product_tags =====
-            $this->saveTagsToPivot($product->id, $validated['tag_id'], $currentCompanyId);
+            // ═══════════════════════════════════════════════════════════
+            // ⚡ CRITICAL FIX: فلترة tag_id قبل الحفظ
+            // - لا تنشئ tags جديدة أبداً
+            // - استخدم فقط الـ IDs الموجودة AND المتاحة للمستخدم
+            // ═══════════════════════════════════════════════════════════
+            $rawTagIds = $validated['tag_id'] ?? [];
+            $validTagIds = $this->filterValidTagIds($rawTagIds, $currentCompanyId);
+
+            if (count($rawTagIds) !== count($validTagIds)) {
+                Log::warning('ProductController@update: Filtered out invalid tag IDs', [
+                    'product_id'      => $product->id,
+                    'company_id'      => $currentCompanyId,
+                    'sent_tag_ids'    => $rawTagIds,
+                    'valid_tag_ids'   => $validTagIds,
+                    'filtered_count'  => count($rawTagIds) - count($validTagIds),
+                ]);
+            }
+
+            $this->saveTagsToPivot($product->id, $validTagIds, $currentCompanyId);
 
             // ===== TABLE: health_products =====
+            $bottleSizeUnit = $validated['bottle_size_unit'] ?? (($validated['product_form'] == 'Liquid') ? 'oz' : 'caps');
             HealthProduct::updateOrCreate(
                 ['product_id' => $product->id, 'created_by' => $currentCompanyId],
                 [
                     'sku'                     => $validated['product_sku'],
                     'product_form'            => $validated['product_form'],
                     'bottle_size'             => $validated['bottle_size'],
-                    'bottle_size_unit'        => ($validated['product_form'] == 'Liquid') ? 'oz' : 'caps',
+                    'bottle_size_unit'        => $bottleSizeUnit,
                     'product_image_url'       => $validated['product_image_url'] ?? null,
                     'full_name'               => $validated['full_name'] ?? null,
                     'ingredients'             => $validated['ingredients'] ?? null,
@@ -632,33 +581,27 @@ class ProductController extends Controller
                     'dosing_dinner'           => $dosingNa ? null : ($validated['dosing_dinner'] ?? null),
                     'dosing_before_sleep'     => $dosingNa ? null : ($validated['dosing_before_sleep'] ?? null),
                     'dosing_na'               => $dosingNa,
-                ]
-            );
-
-            // ═══════════════════════════════════════════════════════════════════════
-            // ⚡ NEW: Sync Primary Indications على الـ pivot
-            // ═══════════════════════════════════════════════════════════════════════
-            $product->syncPrimaryIndications($validated['primary_indications'] ?? []);
-
-            // ===== TABLE: product_pairs =====
-            $pairIds = $validated['pairs_well_with'] ?? [];
-            $this->syncPairsWellWith($product->id, $pairIds, $currentCompanyId);
-
-            // ===== TABLE: product_company_overrides =====
-            ProductCompanyOverride::updateOrCreate(
-                ['product_id' => $product->id, 'company_id' => $currentCompanyId],
-                [
                     'practitioner_notes'         => $validated['practitioner_notes'] ?? null,
                     'custom_primary_indications' => $validated['custom_primary_indications'] ?? [],
                     'custom_dosing_notes'        => $validated['custom_dosing_notes'] ?? null,
                 ]
             );
 
-            // ==================== Dispatch Product Event ====================
-            // Note: saveQuietly() above does NOT trigger observer, so we dispatch manually.
-            // FIX: نُرفق slug الشركة التي قامت بالتعديل (سواء كانت شركة عادية أو
-            // السوبر ادمن نفسه) لكي يستطيع الـ desktop app معرفة أي شركة يجب
-            // أن تستقبل/تحديث نسختها من المنتج.
+            // ===== Primary Indications Pivot =====
+            $product->syncPrimaryIndications($validated['primary_indications'] ?? []);
+
+            // ===== Pairs Well With =====
+            $pairIds = $validated['pairs_well_with'] ?? [];
+            $this->syncPairsWellWith($product->id, $pairIds, $currentCompanyId);
+
+            // ===== Override (فقط is_visible، الحقول الأخرى انتقلت لـ health_products) =====
+            ProductCompanyOverride::updateOrCreate(
+                ['product_id' => $product->id, 'company_id' => $currentCompanyId],
+                [
+                    'is_visible' => true,
+                ]
+            );
+
             $updatedProductId = $product->id;
             $companySlug = $this->getCurrentCompanySlug($currentCompanyId);
 
@@ -704,8 +647,6 @@ class ProductController extends Controller
             'dosing_dinner'            => 'nullable|string|max:255',
             'dosing_before_sleep'      => 'nullable|string|max:255',
             'dosing_na'                => 'nullable|boolean',
-            // FIX: غيّرنا 'required|array|min:1' إلى 'nullable|array' لأن
-            // الشركة قد ترغب في إزالة كل tags من override الخاص بها.
             'tag_id'                   => 'nullable|array',
             'tag_id.*'                 => 'exists:tags,id',
             'practitioner_notes'       => 'nullable|string|max:5000',
@@ -718,9 +659,9 @@ class ProductController extends Controller
             $currentCompanyId = createdBy();
             $dosingNa = $request->boolean('dosing_na');
 
-            // ════════════════════════════════════════════════════════════════════
-            // ⚡ UPDATED: primary_indications override = array of NAMES (not IDs)
-            // ════════════════════════════════════════════════════════════════════
+            // ═══════════════════════════════════════════════════════════
+            // Primary Indications override = array of NAMES (not IDs)
+            // ═══════════════════════════════════════════════════════════
             $indicationIds = $validated['primary_indications'] ?? [];
             $indicationNames = [];
             if (!empty($indicationIds)) {
@@ -746,25 +687,46 @@ class ProductController extends Controller
                     'dosing_dinner'             => $dosingNa ? null : ($validated['dosing_dinner'] ?? null),
                     'dosing_before_sleep'       => $dosingNa ? null : ($validated['dosing_before_sleep'] ?? null),
                     'dosing_na'                 => $dosingNa,
-                    'practitioner_notes'         => $validated['practitioner_notes'] ?? null,
-                    'custom_primary_indications' => $validated['custom_primary_indications'] ?? [],
-                    'custom_dosing_notes'        => $validated['custom_dosing_notes'] ?? null,
                     'is_visible' => true,
                 ]
             );
 
-            // FIX: نمرر [] كافتراضي لأن tag_id أصبح nullable بعد التعديل
-            $this->saveTagsToPivot($product->id, $validated['tag_id'] ?? [], $currentCompanyId);
+            // ═══════════════════════════════════════════════════════════
+            // ⚡ CRITICAL FIX: فلترة tag_id قبل الحفظ
+            // - لا تنشئ tags جديدة أبداً
+            // - استخدم فقط الـ IDs الموجودة AND المتاحة للشركة
+            // ═══════════════════════════════════════════════════════════
+            $rawTagIds = $validated['tag_id'] ?? [];
+            $validTagIds = $this->filterValidTagIds($rawTagIds, $currentCompanyId);
 
-            // ════════════════════════════════════════════════════════════════════
-            // FIX: عند تعديل منتج من السوبر ادمن من قبل صاحب الشركة، يجب أن
-            // تحتوي رسالة الـ RabbitMQ على الـ slug الخاص بصاحب الشركة (وليس
-            // slug السوبر ادمن) لكي يستطيع الـ desktop app للشركة تحديث نسخته
-            // المحلية من المنتج بناءً على override الخاص به.
-            //
-            // نمرر override_company_id لكي يبني الـ Observer الـ payload من
-            // منظور الشركة المُعدِّلة (practitioner, tags, override, dosing).
-            // ════════════════════════════════════════════════════════════════════
+            if (count($rawTagIds) !== count($validTagIds)) {
+                Log::warning('ProductController@updateOverride: Filtered out invalid tag IDs', [
+                    'product_id'      => $product->id,
+                    'company_id'      => $currentCompanyId,
+                    'sent_tag_ids'    => $rawTagIds,
+                    'valid_tag_ids'   => $validTagIds,
+                    'filtered_count'  => count($rawTagIds) - count($validTagIds),
+                ]);
+            }
+
+            $this->saveTagsToPivot($product->id, $validTagIds, $currentCompanyId);
+
+            // ═══════════════════════════════════════════════════════════
+            // ⚡ حفظ practitioner_notes و custom fields في health_products
+            // (مش في override لأنها انتقلت هناك)
+            // ═══════════════════════════════════════════════════════════
+            $superAdminId = getSuperAdminCompanyId();
+            $healthProduct = HealthProduct::where('product_id', $product->id)
+                ->where('created_by', $superAdminId)
+                ->first();
+
+            if ($healthProduct) {
+                $healthProduct->practitioner_notes = $validated['practitioner_notes'] ?? null;
+                $healthProduct->custom_primary_indications = $validated['custom_primary_indications'] ?? [];
+                $healthProduct->custom_dosing_notes = $validated['custom_dosing_notes'] ?? null;
+                $healthProduct->save();
+            }
+
             $overrideProductId = $product->id;
             $companySlug = $this->getCurrentCompanySlug($currentCompanyId);
 
@@ -810,6 +772,7 @@ class ProductController extends Controller
             ProductCompanyOverride::where('product_id', $product->id)->delete();
             DB::table('product_tags')->where('product_id', $product->id)->delete();
             DB::table('product_pairs')->where('product_id', $product->id)->delete();
+            DB::table('product_primary_indications')->where('product_id', $product->id)->delete();
             $product->delete();
             DB::commit();
             return redirect()->back()->with('success', __('Product deleted successfully.'));
@@ -836,7 +799,6 @@ class ProductController extends Controller
             $product->status = $product->status === 'active' ? 'inactive' : 'active';
             $product->save();
 
-            // ==================== Dispatch Product Event ====================
             $toggledProductId = $product->id;
             $companySlug = $this->getCurrentCompanySlug($product->created_by);
 
@@ -860,6 +822,7 @@ class ProductController extends Controller
             return redirect()->back()->with('error', __('Failed to update product status: :error', ['error' => $e->getMessage()]));
         }
     }
+
     // =========================================================================
     // =========== EXPORT / IMPORT =============================================
     // =========================================================================
@@ -947,25 +910,7 @@ class ProductController extends Controller
     // =========== IMPORT FROM EXCEL (Super Admin Only) ========================
     // =========================================================================
 
-    /**
-     * استيراد المنتجات من ملف Excel
-     * فقط السوبر ادمن يقدر يستخدم هاد الميثود
-     *
-     * Mapping from old project:
-     * - isSuperAdmin() → auth()->user()->isSuperAdmin()
-     * - getCurrentStore() → getSuperAdminCompanyId()
-     * - store_id → created_by
-     * - ProductMerchantOverride → ProductCompanyOverride
-     * - ProductBrand → Brand
-     * - status 1/0 → 'active'/'inactive'
-     * - PrimaryIndication pivot → primary_indications JSON on health_products
-     * - cover_image_url → Spatie MediaLibrary (not set here, use product_image_url on health_products)
-     * - variant_product, trending, custom_field_status → REMOVED
-     *
-     * NOTE: tags table uses company_id (not created_by).
-     *       product_tags pivot still uses created_by.
-     */
- public function importFromExcel(Request $request)
+    public function importFromExcel(Request $request)
     {
         if (!auth()->user()->isSuperAdmin()) {
             return response()->json([
@@ -981,7 +926,6 @@ class ProductController extends Controller
 
             $file = $request->file('import_file');
 
-            // Load the spreadsheet
             $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file->getPathname());
             $worksheet   = $spreadsheet->getActiveSheet();
             $rows        = $worksheet->toArray(null, true, true, true);
@@ -993,7 +937,6 @@ class ProductController extends Controller
                 ]);
             }
 
-            // ---- Build header map (normalize to lowercase trimmed keys) ----
             $rawHeaders = array_shift($rows);
             $headerMap  = [];
             foreach ($rawHeaders as $col => $header) {
@@ -1008,24 +951,17 @@ class ProductController extends Controller
                 'total_rows' => count($rows),
             ]);
 
-            // ═══════════════════════════════════════════════════════════════
-            // NEW: كشف وضع Frequency-Only
-            // لو الملف يحتوي فقط على sku + frequency → وضع التحديث السريع
-            // ═══════════════════════════════════════════════════════════════
+            // Frequency-Only Mode detection
             $headerKeys = array_keys($headerMap);
             $hasSku      = in_array('sku', $headerKeys, true);
             $hasFreq     = in_array('frequency', $headerKeys, true)
                         || in_array('dosing_frequency', $headerKeys, true)
                         || in_array('freq', $headerKeys, true);
 
-            // لو الملف يحتوي على sku + frequency فقط (أي 2 أعمدة بالظبط)
             if ($hasSku && $hasFreq && count($headerKeys) === 2) {
                 return $this->importFrequencyOnly($rows, $headerMap);
             }
 
-            // ═══════════════════════════════════════════════════════════════
-            // EXISTING: Normal Import Mode (Add + Update + Skip)
-            // ═══════════════════════════════════════════════════════════════
             $superAdminCompanyId = getSuperAdminCompanyId();
             $importedCount       = 0;
             $updatedCount        = 0;
@@ -1037,40 +973,34 @@ class ProductController extends Controller
                 $displayRow = $rowIndex + 2;
 
                 try {
-                    // Normalize row data into an associative array keyed by header
                     $item = [];
                     foreach ($headerMap as $key => $col) {
                         $item[$key] = $row[$col] ?? null;
                     }
 
-                    // ---- SKU (required) - Fix numeric SKUs ----
+                    // ---- SKU ----
                     $skuRaw = $item['sku'] ?? null;
                     $sku = $this->cleanImportValue($skuRaw);
-
                     if ($sku !== null && is_numeric($sku)) {
                         $sku = (string) intval(floatval($sku));
                     }
-
                     if (empty($sku)) {
                         $skippedCount++;
                         $errorMessages[] = "Row {$displayRow}: Missing SKU — skipped.";
                         continue;
                     }
 
-                    // ---- Check if SKU already exists ----
                     $existingHealthProduct = HealthProduct::where('sku', $sku)->first();
                     $isUpdate = !is_null($existingHealthProduct);
 
                     // ---- Category ----
                     $categoryId   = null;
-                    $categoryName = $this->cleanImportValue($item['category'] ?? null);
+                    $categoryName = $this->getHeaderValue($item, ['category', 'category name', 'cat']);
                     if ($categoryName) {
                         $categoryName = html_entity_decode($categoryName, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-
                         $category = Category::where('name', $categoryName)
                             ->where('created_by', $superAdminCompanyId)
                             ->first();
-
                         if (!$category) {
                             $categorySlug  = Str::slug($categoryName);
                             $originalSlug  = $categorySlug;
@@ -1078,7 +1008,6 @@ class ProductController extends Controller
                             while (Category::where('slug', $categorySlug)->exists()) {
                                 $categorySlug = $originalSlug . '-' . $counter++;
                             }
-
                             $category = Category::create([
                                 'name'       => $categoryName,
                                 'slug'       => $categorySlug,
@@ -1090,22 +1019,18 @@ class ProductController extends Controller
                         $categoryId = $category->id;
                     }
 
-                    // ---- Price ----
-                    $priceStr = $item['regular price'] ?? '0';
+                    // ---- Price / Sale Price ----
+                    $priceStr = $this->getHeaderValue($item, ['regular price', 'price']) ?? '0';
                     $price    = floatval(preg_replace('/[^0-9.]/', '', $priceStr));
-
-                    // ---- Sale Price ----
-                    $salePriceStr = $item['sale price'] ?? null;
+                    $salePriceStr = $this->getHeaderValue($item, ['sale price', 'discount price']);
                     $salePrice = $salePriceStr ? floatval(preg_replace('/[^0-9.]/', '', $salePriceStr)) : 0;
 
-                    // ---- Product Name & Slug ----
-                    $productName = $this->cleanImportValue($item['product name'] ?? null) ?: 'Unnamed Product';
-
-                    // ---- Full Name ----
-                    $fullName = $this->cleanImportValue($item['full name'] ?? null);
+                    // ---- Names ----
+                    $productName = $this->getHeaderValue($item, ['product name', 'name', 'title']) ?: 'Unnamed Product';
+                    $fullName    = $this->getHeaderValue($item, ['full name']);
 
                     // ---- Supplier / Brand ----
-                    $supplierName = $this->cleanImportValue($item['supplier'] ?? $item['brand'] ?? null);
+                    $supplierName = $this->getHeaderValue($item, ['supplier', 'brand', 'supplier name', 'brand name']);
                     $brandId = null;
                     if ($supplierName) {
                         $brand = Brand::firstOrCreate(
@@ -1115,167 +1040,155 @@ class ProductController extends Controller
                         $brandId = $brand->id;
                     }
 
-                    // ---- Description ----
-                    $description = $this->cleanImportValue($item['description'] ?? null) ?? '';
+                    // ---- Other product fields ----
+                    $description = $this->getHeaderValue($item, ['description', 'desc']) ?? '';
+                    $isActiveRaw = strtolower(trim((string) ($item['is active'] ?? '')));
+                    $status      = in_array($isActiveRaw, ['true', '1', 'yes']) ? 'active' : 'inactive';
+                    if ($isActiveRaw === '') $status = 'active';
 
-                    // ---- Is Active → status ----
-                    $isActiveRaw  = strtolower(trim((string) ($item['is active'] ?? '')));
-                    $status       = in_array($isActiveRaw, ['true', '1', 'yes']) ? 'active' : 'inactive';
-                    if ($isActiveRaw === '') {
-                        $status = 'active';
-                    }
+                    $frequency = $this->getHeaderValue($item, ['frequency', 'dosing frequency', 'freq']);
+                    if ($frequency && in_array(strtolower($frequency), ['n/a', 'none'])) $frequency = null;
 
-                    // ---- frequency field ----
-                    $frequency = $this->cleanImportValue($item['frequency'] ?? null);
-                    if ($frequency && in_array(strtolower($frequency), ['n/a', 'none'])) {
-                        $frequency = null;
-                    }
-
-                    // ---- Image URL ----
-                    $imageUrl = $this->cleanImportValue($item['product image url'] ?? null);
-                    if ($imageUrl && in_array(strtolower($imageUrl), ['n/a', 'none'])) {
-                        $imageUrl = null;
-                    }
+                    $imageUrl = $this->getHeaderValue($item, ['product image url', 'image url', 'image']);
+                    if ($imageUrl && in_array(strtolower($imageUrl), ['n/a', 'none'])) $imageUrl = null;
 
                     // ---- Bottle Size / Unit Count ----
-                    $bottleSize = $this->cleanImportValue($item['bottle size / unit count'] ?? null);
-                    if ($bottleSize && strtolower($bottleSize) === 'none') {
-                        $bottleSize = null;
-                    }
+                    $bottleSizeRaw = $this->getHeaderValue($item, ['bottle size / unit count', 'bottle size', 'size']);
+                    $parsedBottle  = $this->parseBottleSizeAndUnit($bottleSizeRaw);
+                    $bottleSize    = $parsedBottle['bottle_size'];
+                    $bottleSizeUnit = $parsedBottle['bottle_size_unit'];
 
                     // ---- Product Form ----
-                    $productFormExcel = $this->cleanImportValue($item['product form'] ?? null);
-                    if ($productFormExcel && in_array(strtolower($productFormExcel), ['n/a', 'none'])) {
-                        $productFormExcel = null;
-                    }
+                    $productFormExcel = $this->getHeaderValue($item, ['product form', 'form']);
+                    if ($productFormExcel && in_array(strtolower($productFormExcel), ['n/a', 'none'])) $productFormExcel = null;
 
-                    $productForm    = null;
-                    $bottleSizeUnit = null;
-
+                    $productForm = null;
                     if ($productFormExcel) {
                         $pfLower = strtolower(trim($productFormExcel));
                         if (in_array($pfLower, ['liquid', 'tincture', 'drop', 'drops', 'oil', 'spray', 'liquid extract'])) {
-                            $productForm    = 'Liquid';
-                            $bottleSizeUnit = 'oz';
+                            $productForm = 'Liquid';
+                            if (!$bottleSizeUnit) $bottleSizeUnit = 'oz';
                         } elseif (in_array($pfLower, ['caps', 'capsule', 'capsules', 'caplet', 'caplets', 'tablet', 'tablets', 'softgel', 'softgels'])) {
-                            $productForm    = 'Caps';
-                            $bottleSizeUnit = 'caps';
+                            $productForm = 'Caps';
+                            if (!$bottleSizeUnit) $bottleSizeUnit = 'caps';
                         } elseif (in_array($pfLower, ['powder', 'powders'])) {
-                            $productForm    = 'Powder';
-                            $bottleSizeUnit = 'g';
+                            $productForm = 'Powder';
+                            if (!$bottleSizeUnit) $bottleSizeUnit = 'g';
                         } elseif (in_array($pfLower, ['gummy', 'gummies', 'chewable'])) {
-                            $productForm    = 'Gummy';
-                            $bottleSizeUnit = 'gummies';
+                            $productForm = 'Gummy';
+                            if (!$bottleSizeUnit) $bottleSizeUnit = 'gummies';
                         } elseif (in_array($pfLower, ['tea', 'herbal tea', 'loose tea', 'tea bags'])) {
-                            $productForm    = 'Tea';
-                            $bottleSizeUnit = 'bags';
+                            $productForm = 'Tea';
+                            if (!$bottleSizeUnit) $bottleSizeUnit = 'bags';
                         } elseif (in_array($pfLower, ['cream', 'topical', 'ointment', 'lotion', 'salve', 'balm', 'gel'])) {
-                            $productForm    = 'Topical';
-                            $bottleSizeUnit = 'oz';
+                            $productForm = 'Topical';
+                            if (!$bottleSizeUnit) $bottleSizeUnit = 'oz';
                         } else {
                             $productForm = $productFormExcel;
                         }
-                    } elseif ($bottleSize) {
-                        if (preg_match('/fl\\s*oz|ml|oz\\b|liquid|tincture|drop/i', $bottleSize)) {
-                            $productForm    = 'Liquid';
-                            $bottleSizeUnit = 'oz';
-                        } elseif (preg_match('/cap|tablet|caplet|ct\\b|capsule/i', $bottleSize)) {
-                            $productForm    = 'Caps';
-                            $bottleSizeUnit = 'caps';
+                    } elseif ($bottleSizeRaw) {
+                        $bsLower = strtolower($bottleSizeRaw);
+                        if (preg_match('/cap|tablet|caplet|ct\\b|capsule/i', $bsLower)) {
+                            $productForm = 'Caps';
+                        } elseif (preg_match('/fl\\s*oz|ml|oz\\b|liquid|tincture|drop/i', $bsLower)) {
+                            $productForm = 'Liquid';
                         }
                     }
 
-                    // ---- Contraindications ----
-                    $contraindications = $this->cleanImportValue($item['contraindications'] ?? null);
+                    // ---- Health product fields ----
+                    $contraindications = $this->getHeaderValue($item, ['contraindications']);
                     if (empty($contraindications) || in_array(strtolower($contraindications ?? ''), ['n/a', 'none'])) {
                         $contraindications = 'N/A';
                     }
-
-                    // ---- Ingredients ----
-                    $ingredients = $this->cleanImportValue($item['ingredients'] ?? null);
-                    if ($ingredients && strtolower($ingredients) === 'none') {
-                        $ingredients = null;
-                    }
-
-                    // ---- Research Links ----
-                    $researchLinks = $this->cleanImportValue($item['research / studies / article links'] ?? null);
-                    if ($researchLinks && in_array(strtolower($researchLinks), ['n/a', 'none'])) {
-                        $researchLinks = null;
-                    }
-
-                    // ---- Supports ----
-                    $supports = $this->cleanImportValue($item['supports'] ?? null);
-                    if ($supports && in_array(strtolower($supports), ['n/a', 'none'])) {
-                        $supports = null;
-                    }
-
-                    // ---- Useful For ----
-                    $usefulFor = $this->cleanImportValue($item['useful for'] ?? null);
-                    if ($usefulFor && in_array(strtolower($usefulFor), ['n/a', 'none'])) {
-                        $usefulFor = null;
-                    }
+                    $ingredients = $this->getHeaderValue($item, ['ingredients']);
+                    if ($ingredients && strtolower($ingredients) === 'none') $ingredients = null;
+                    $researchLinks = $this->getHeaderValue($item, ['research / studies / article links', 'research links', 'research']);
+                    if ($researchLinks && in_array(strtolower($researchLinks), ['n/a', 'none'])) $researchLinks = null;
+                    $supports = $this->getHeaderValue($item, ['supports']);
+                    if ($supports && in_array(strtolower($supports), ['n/a', 'none'])) $supports = null;
+                    $usefulFor = $this->getHeaderValue($item, ['useful for']);
+                    if ($usefulFor && in_array(strtolower($usefulFor), ['n/a', 'none'])) $usefulFor = null;
 
                     // ---- Dosing Fields ----
                     $dosingMap = [
-                        'upon rising'        => 'dosing_upon_rising',
-                        'breakfast'          => 'dosing_breakfast',
-                        'between meals (am)' => 'dosing_between_meals_am',
-                        'lunch'              => 'dosing_lunch',
-                        'between meals (pm)' => 'dosing_between_meals_pm',
-                        'dinner'             => 'dosing_dinner',
-                        'before sleep'       => 'dosing_before_sleep',
+                        ['upon rising', 'dosing_upon_rising'],
+                        ['breakfast', 'dosing_breakfast'],
+                        ['between meals (am)', 'dosing_between_meals_am'],
+                        ['lunch', 'dosing_lunch'],
+                        ['between meals (pm)', 'dosing_between_meals_pm'],
+                        ['dinner', 'dosing_dinner'],
+                        ['before sleep', 'dosing_before_sleep'],
                     ];
-
                     $dosingData    = [];
                     $hasDosingData = false;
-                    foreach ($dosingMap as $excelKey => $dbField) {
+                    foreach ($dosingMap as [$excelKey, $dbField]) {
                         $val = $this->cleanImportValue($item[$excelKey] ?? null);
-                        if ($val && strtolower($val) === 'none') {
-                            $val = null;
-                        }
+                        if ($val && strtolower($val) === 'none') $val = null;
                         $dosingData[$dbField] = $val;
-                        if (!empty($val)) {
-                            $hasDosingData = true;
-                        }
+                        if (!empty($val)) $hasDosingData = true;
                     }
 
-                    // ---- Practitioner Notes ----
-                    $practitionerNotes = $this->cleanImportValue($item['practitioner notes'] ?? null);
-                    if ($practitionerNotes && strtolower($practitionerNotes) === 'none') {
-                        $practitionerNotes = null;
-                    }
+                    // ---- Override/Custom fields (انتقلت لـ health_products) ----
+                    $practitionerNotes = $this->getHeaderValue($item, ['practitioner notes']);
+                    if ($practitionerNotes && strtolower($practitionerNotes) === 'none') $practitionerNotes = null;
 
-                    // ---- Custom Primary Indications ----
-                    $customPrimaryIndications = $this->cleanImportValue($item['custom primary indications'] ?? null);
-                    if ($customPrimaryIndications && strtolower($customPrimaryIndications) === 'none') {
-                        $customPrimaryIndications = null;
-                    }
+                    $customPrimaryIndications = $this->getHeaderValue($item, ['custom primary indications']);
+                    if ($customPrimaryIndications && strtolower($customPrimaryIndications) === 'none') $customPrimaryIndications = null;
                     $customPrimaryIndicationsArray = $customPrimaryIndications
                         ? array_filter(array_map('trim', explode(',', $customPrimaryIndications)))
                         : [];
 
-                    // ---- Custom Dosing Notes ----
-                    $customDosingNotes = $this->cleanImportValue($item['custom dosing notes'] ?? null);
-                    if ($customDosingNotes && strtolower($customDosingNotes) === 'none') {
-                        $customDosingNotes = null;
-                    }
+                    $customDosingNotes = $this->getHeaderValue($item, ['custom dosing notes']);
+                    if ($customDosingNotes && strtolower($customDosingNotes) === 'none') $customDosingNotes = null;
 
-                    // ---- Primary Indications (JSON) ----
-                    $indicationsRaw = $this->cleanImportValue($item['primary indications'] ?? null);
-                    $primaryIndications = [];
+                    // ═══════════════════════════════════════════════════════════════
+                    // ⚡ Primary Indications — استخراج مع aliases متعددة
+                    // ═══════════════════════════════════════════════════════════════
+                    $indicationsRaw = $this->getHeaderValue($item, [
+                        'primary indications',
+                        'primary indication',
+                        'indications',
+                        'indication',
+                        'primary_indications',
+                        'primary_indication',
+                    ]);
+
+                    $primaryIndicationsNames = [];
                     if ($indicationsRaw && strtolower($indicationsRaw) !== 'none') {
-                        $primaryIndications = array_filter(
+                        $primaryIndicationsNames = array_filter(
                             array_map('trim', preg_split('/[,|]/', $indicationsRaw))
                         );
                     }
 
+                    Log::info("Excel Import: Primary indications parsing", [
+                        'row'         => $displayRow,
+                        'sku'         => $sku,
+                        'raw_value'   => $indicationsRaw,
+                        'parsed_names'=> $primaryIndicationsNames,
+                    ]);
+
+                    // ⚡ Find-or-Create متين لكل اسم
+                    $indicationIds = [];
+                    foreach ($primaryIndicationsNames as $indicationName) {
+                        if (empty($indicationName)) continue;
+                        $indication = $this->findOrCreateIndicationRobust($indicationName);
+                        if ($indication) {
+                            $indicationIds[] = $indication->id;
+                        }
+                    }
+
+                    Log::info("Excel Import: Primary indications resolved", [
+                        'row'  => $displayRow,
+                        'sku'  => $sku,
+                        'ids'  => $indicationIds,
+                        'count'=> count($indicationIds),
+                    ]);
+
                     // ---- Tags ----
-                    $tagsRaw = $this->cleanImportValue($item['tags'] ?? null);
+                    $tagsRaw = $this->getHeaderValue($item, ['tags', 'tag']);
                     $desiredTagIds = [];
                     if ($tagsRaw && strtolower($tagsRaw) !== 'none') {
-                        $tagNames = array_filter(
-                            array_map('trim', preg_split('/[,|]/', $tagsRaw))
-                        );
+                        $tagNames = array_filter(array_map('trim', preg_split('/[,|]/', $tagsRaw)));
                         foreach ($tagNames as $tagName) {
                             if (empty($tagName)) continue;
                             $tag = Tag::firstOrCreate(
@@ -1292,14 +1205,13 @@ class ProductController extends Controller
                     // ====================================================
                     if ($isUpdate) {
                         $product = Product::find($existingHealthProduct->product_id);
-
                         if (!$product) {
                             $skippedCount++;
                             $errorMessages[] = "Row {$displayRow}: SKU {$sku} exists in health_products but product_id {$existingHealthProduct->product_id} not found — skipped.";
                             continue;
                         }
 
-                        // BUILD DESIRED STATE
+                        // Desired state
                         $newProductName    = $productName;
                         $newDescription    = $description;
                         $newPrice          = $price;
@@ -1310,37 +1222,24 @@ class ProductController extends Controller
                         $newFrequency      = $frequency;
 
                         $newHealthData = [
-                            'product_image_url'   => $imageUrl,
-                            'bottle_size'         => $bottleSize,
-                            'ingredients'         => $ingredients,
-                            'contraindications'   => $contraindications,
-                            'research_links'      => $researchLinks,
-                            'supports'            => $supports,
-                            'useful_for'          => $usefulFor,
-                            'primary_indications' => $primaryIndications,
-                            'dosing_na'           => $hasDosingData ? false : true,
+                            'product_image_url'           => $imageUrl,
+                            'bottle_size'                 => $bottleSize,
+                            'bottle_size_unit'            => $bottleSizeUnit,
+                            'ingredients'                 => $ingredients,
+                            'contraindications'           => $contraindications,
+                            'research_links'              => $researchLinks,
+                            'supports'                    => $supports,
+                            'useful_for'                  => $usefulFor,
+                            'dosing_na'                   => $hasDosingData ? false : true,
+                            'practitioner_notes'          => $practitionerNotes,
+                            'custom_primary_indications'  => $customPrimaryIndicationsArray,
+                            'custom_dosing_notes'         => $customDosingNotes,
                         ];
-                        if ($fullName)         $newHealthData['full_name']       = $fullName;
-                        if ($productForm)      $newHealthData['product_form']    = $productForm;
-                        if ($bottleSizeUnit)   $newHealthData['bottle_size_unit'] = $bottleSizeUnit;
+                        if ($fullName)         $newHealthData['full_name']    = $fullName;
+                        if ($productForm)      $newHealthData['product_form'] = $productForm;
                         foreach ($dosingData as $field => $val) {
                             $newHealthData[$field] = $val;
                         }
-
-                        $newOverrideData = [];
-                        if ($practitionerNotes) {
-                            $newOverrideData['practitioner_notes'] = $practitionerNotes;
-                        }
-                        if (!empty($customPrimaryIndicationsArray)) {
-                            $newOverrideData['custom_primary_indications'] = $customPrimaryIndicationsArray;
-                        }
-                        if ($customDosingNotes) {
-                            $newOverrideData['custom_dosing_notes'] = $customDosingNotes;
-                        }
-
-                        $existingOverride = ProductCompanyOverride::where('product_id', $product->id)
-                            ->where('company_id', $superAdminCompanyId)
-                            ->first();
 
                         // DETECT CHANGES
                         $productChanges = [];
@@ -1361,27 +1260,25 @@ class ProductController extends Controller
                             }
                         }
 
-                        $overrideChanges = [];
-                        foreach ($newOverrideData as $field => $val) {
-                            $currentVal = $existingOverride?->{$field} ?? null;
-                            if ($this->isFieldDifferent($currentVal, $val)) {
-                                $overrideChanges[$field] = $val;
-                            }
-                        }
+                        $currentIndicationIds = $product->primaryIndications()->pluck('primary_indications.id')->toArray();
+                        sort($currentIndicationIds);
+                        $desiredIndicationIds = $indicationIds;
+                        sort($desiredIndicationIds);
+                        $indicationsChanged = ($currentIndicationIds !== $desiredIndicationIds);
 
                         $currentTagIds = DB::table('product_tags')
                             ->where('product_id', $product->id)
                             ->where('created_by', $superAdminCompanyId)
                             ->pluck('tag_id')
                             ->toArray();
-                        $currentTagIdsSorted = $currentTagIds;
+                        sort($currentTagIds);
                         $desiredTagIdsSorted = $desiredTagIds;
-                        sort($currentTagIdsSorted);
                         sort($desiredTagIdsSorted);
-                        $tagsChanged = ($currentTagIdsSorted !== $desiredTagIdsSorted);
+                        $tagsChanged = ($currentTagIds !== $desiredTagIdsSorted);
 
                         // SKIP لو مفيش أي تغيير
-                        if (empty($productChanges) && empty($healthChanges) && empty($overrideChanges) && !$tagsChanged) {
+                        if (empty($productChanges) && empty($healthChanges)
+                            && !$tagsChanged && !$indicationsChanged) {
                             $skippedCount++;
                             Log::info("Excel Import: Skipped (no changes)", [
                                 'row'         => $displayRow,
@@ -1409,11 +1306,14 @@ class ProductController extends Controller
                             $existingHealthProduct->save();
                         }
 
-                        if (!empty($overrideChanges)) {
-                            ProductCompanyOverride::updateOrCreate(
-                                ['product_id' => $product->id, 'company_id' => $superAdminCompanyId],
-                                array_merge(['is_visible' => true], $overrideChanges)
-                            );
+                        // ⚡ Sync Primary Indications عبر Pivot
+                        if ($indicationsChanged) {
+                            $product->syncPrimaryIndications($indicationIds);
+                            Log::info("Excel Import: Synced primary indications", [
+                                'sku'         => $sku,
+                                'product_id'  => $product->id,
+                                'ids'         => $indicationIds,
+                            ]);
                         }
 
                         if ($tagsChanged) {
@@ -1432,16 +1332,16 @@ class ProductController extends Controller
                         $updatedCount++;
 
                         Log::info("Excel Import: Updated product", [
-                            'row'            => $displayRow,
-                            'sku'            => $sku,
-                            'product_id'     => $product->id,
-                            'product_fields' => array_keys($productChanges),
-                            'health_fields'  => array_keys($healthChanges),
-                            'override_fields'=> array_keys($overrideChanges),
-                            'tags_changed'   => $tagsChanged,
+                            'row'                 => $displayRow,
+                            'sku'                 => $sku,
+                            'product_id'          => $product->id,
+                            'product_fields'      => array_keys($productChanges),
+                            'health_fields'       => array_keys($healthChanges),
+                            'tags_changed'        => $tagsChanged,
+                            'indications_changed' => $indicationsChanged,
                         ]);
                     } else {
-                        // CREATE NEW PRODUCT
+                        // ============ CREATE NEW PRODUCT ============
                         $productSlug = Str::slug($productName);
                         $origSlug    = $productSlug;
                         $pCounter    = 1;
@@ -1465,36 +1365,39 @@ class ProductController extends Controller
                         $product->frequency    = $frequency;
                         $product->saveQuietly();
 
+                        // Create Health Product
                         $healthData = [
-                            'product_id'          => $product->id,
-                            'created_by'          => $superAdminCompanyId,
-                            'sku'                 => $sku,
-                            'product_image_url'   => $imageUrl,
-                            'bottle_size'         => $bottleSize,
-                            'ingredients'         => $ingredients,
-                            'contraindications'   => $contraindications,
-                            'research_links'      => $researchLinks,
-                            'supports'            => $supports,
-                            'useful_for'          => $usefulFor,
-                            'primary_indications' => $primaryIndications,
-                            'dosing_na'           => $hasDosingData ? false : true,
+                            'product_id'                 => $product->id,
+                            'created_by'                 => $superAdminCompanyId,
+                            'sku'                        => $sku,
+                            'product_image_url'          => $imageUrl,
+                            'bottle_size'                => $bottleSize,
+                            'bottle_size_unit'           => $bottleSizeUnit,
+                            'ingredients'                => $ingredients,
+                            'contraindications'          => $contraindications,
+                            'research_links'             => $researchLinks,
+                            'supports'                   => $supports,
+                            'useful_for'                 => $usefulFor,
+                            'dosing_na'                  => $hasDosingData ? false : true,
+                            'practitioner_notes'         => $practitionerNotes,
+                            'custom_primary_indications' => $customPrimaryIndicationsArray,
+                            'custom_dosing_notes'        => $customDosingNotes,
                         ];
-
-                        if ($fullName)       $healthData['full_name']       = $fullName;
-                        if ($productForm)    $healthData['product_form']    = $productForm;
-                        if ($bottleSizeUnit) $healthData['bottle_size_unit'] = $bottleSizeUnit;
+                        if ($fullName)       $healthData['full_name']    = $fullName;
+                        if ($productForm)    $healthData['product_form'] = $productForm;
                         foreach ($dosingData as $field => $val) {
                             $healthData[$field] = $val;
                         }
-
                         HealthProduct::create($healthData);
 
-                        if (!empty($newOverrideData)) {
-                            ProductCompanyOverride::create([
-                                'product_id' => $product->id,
-                                'company_id' => $superAdminCompanyId,
-                                'is_visible' => true,
-                            ] + $newOverrideData);
+                        // ⚡ Sync Primary Indications عبر Pivot
+                        if (!empty($indicationIds)) {
+                            $product->syncPrimaryIndications($indicationIds);
+                            Log::info("Excel Import: Synced primary indications (new product)", [
+                                'sku'         => $sku,
+                                'product_id'  => $product->id,
+                                'ids'         => $indicationIds,
+                            ]);
                         }
 
                         if (!empty($desiredTagIds)) {
@@ -1530,7 +1433,6 @@ class ProductController extends Controller
                 }
             }
 
-            // Build the result message
             $msg = __('Imported: :count, Updated: :updated, Skipped: :skipped', [
                 'count'   => $importedCount,
                 'updated' => $updatedCount,
@@ -1569,24 +1471,8 @@ class ProductController extends Controller
 
     /**
      * ════════════════════════════════════════════════════════════════════
-     * NEW: وضع التحديث السريع لتكرار الـ frequency
+     * Frequency-Only Mode
      * ════════════════════════════════════════════════════════════════════
-     *
-     * يُستخدم لما الملف يحتوي فقط على عمودي `sku` و `frequency`.
-     *
-     * المنطق:
-     *   - لكل صف: ابحث عن المنتج بـ SKU (في جدول products أولاً، ثم health_products)
-     *   - لو لقي المنتج:
-     *       - قارن الـ frequency الحالي بالجديد
-     *       - لو مختلف → UPDATE + updatedCount++
-     *       - لو نفس القيمة → SKIP + skippedCount++
-     *   - لو ما لقي المنتج → SKIP + skippedCount++
-     *
-     * يتجاهل تماماً أي أعمدة أخرى (لو موجودة بالخطأ).
-     *
-     * @param array $rows
-     * @param array $headerMap  lowercase keys → column letters
-     * @return \Illuminate\Http\JsonResponse
      */
     private function importFrequencyOnly(array $rows, array $headerMap)
     {
@@ -1600,7 +1486,6 @@ class ProductController extends Controller
         $errorCount          = 0;
         $errorMessages       = [];
 
-        // تحديد عمود الـ frequency (يدعم aliases)
         $frequencyCol = $headerMap['frequency']
                       ?? $headerMap['dosing_frequency']
                       ?? $headerMap['freq']
@@ -1618,11 +1503,9 @@ class ProductController extends Controller
             $displayRow = $rowIndex + 2;
 
             try {
-                // ---- SKU ----
                 $skuRaw = $row[$skuCol] ?? null;
                 $sku = $this->cleanImportValue($skuRaw);
 
-                // Fix numeric SKUs
                 if ($sku !== null && is_numeric($sku)) {
                     $sku = (string) intval(floatval($sku));
                 }
@@ -1633,19 +1516,14 @@ class ProductController extends Controller
                     continue;
                 }
 
-                // ---- Frequency ----
                 $frequencyRaw = $this->cleanImportValue($row[$frequencyCol] ?? null);
                 if ($frequencyRaw && in_array(strtolower($frequencyRaw), ['n/a', 'none', 'null'])) {
                     $frequencyRaw = null;
                 }
-                // تطبيع: trim فقط (نُحتفظ بالنص كما هو)
                 $newFrequency = $frequencyRaw;
 
-                // ---- البحث عن المنتج ----
-                // 1) ابحث في جدول products مباشرة (الأسرع)
                 $product = Product::where('sku', $sku)->first();
 
-                // 2) fallback: ابحث في health_products ثم خذ المنتج المرتبط
                 if (!$product) {
                     $healthProduct = HealthProduct::where('sku', $sku)->first();
                     if ($healthProduct) {
@@ -1653,37 +1531,22 @@ class ProductController extends Controller
                     }
                 }
 
-                // لو ما لقينا المنتج → SKIP
                 if (!$product) {
                     $skippedCount++;
                     $errorMessages[] = "Row {$displayRow}: SKU {$sku} not found — skipped.";
-                    Log::info("Excel Import [Frequency-Only]: SKU not found", [
-                        'row' => $displayRow,
-                        'sku' => $sku,
-                    ]);
                     continue;
                 }
 
-                // ---- مقارنة الـ frequency ----
                 $currentFrequency = $product->frequency;
 
                 if (!$this->isFieldDifferent($currentFrequency, $newFrequency)) {
-                    // نفس القيمة → SKIP
                     $skippedCount++;
-                    Log::info("Excel Import [Frequency-Only]: Skipped (same frequency)", [
-                        'row'         => $displayRow,
-                        'sku'         => $sku,
-                        'product_id'  => $product->id,
-                        'frequency'   => $currentFrequency,
-                    ]);
                     continue;
                 }
 
-                // ---- تحديث الـ frequency فقط ----
                 $product->frequency = $newFrequency;
                 $product->saveQuietly();
 
-                // Dispatch event
                 \App\Observers\ProductObserver::dispatchProductEvent(
                     $product->id,
                     'updated',
@@ -1694,14 +1557,6 @@ class ProductController extends Controller
                 );
 
                 $updatedCount++;
-
-                Log::info("Excel Import [Frequency-Only]: Updated frequency", [
-                    'row'             => $displayRow,
-                    'sku'             => $sku,
-                    'product_id'      => $product->id,
-                    'old_frequency'   => $currentFrequency,
-                    'new_frequency'   => $newFrequency,
-                ]);
 
             } catch (\Exception $e) {
                 $errorCount++;
@@ -1715,7 +1570,6 @@ class ProductController extends Controller
             }
         }
 
-        // Build the result message — نفس صيغة الـ response العادي
         $msg = __('Frequency update — Updated: :updated, Skipped: :skipped', [
             'updated' => $updatedCount,
             'skipped' => $skippedCount,
@@ -1724,28 +1578,24 @@ class ProductController extends Controller
             $msg .= ' ' . __('Errors: :errors', ['errors' => $errorCount]);
         }
 
-        Log::info("Excel Import [Frequency-Only]: Completed", [
-            'updated' => $updatedCount,
-            'skipped' => $skippedCount,
-            'errors'  => $errorCount,
-        ]);
-
         return response()->json([
             'flag'          => ($updatedCount > 0) ? 'success' : (($errorCount > 0) ? 'error' : 'warning'),
             'msg'           => $msg,
-            'imported'      => 0,                  // ما فيش إضافة في هذا الوضع
+            'imported'      => 0,
             'updated'       => $updatedCount,
             'skipped'       => $skippedCount,
             'errors'        => $errorCount,
             'error_details' => $errorMessages,
-            'mode'          => 'frequency_only',   // مؤشر للـ frontend
+            'mode'          => 'frequency_only',
         ]);
     }
 
+    // =========================================================================
+    // =========== PRIVATE HELPERS =============================================
+    // =========================================================================
 
     /**
      * Clean a value from the Excel import.
-     * Returns null for empty strings, literal "null", "None", etc.
      */
     private function cleanImportValue($value): ?string
     {
@@ -1759,43 +1609,61 @@ class ProductController extends Controller
         return $val;
     }
 
-    // =========================================================================
-    // =========== PRIVATE HELPERS =============================================
-    // =========================================================================
-
     /**
-     * Save tags to product_tags pivot table
-     * NOTE: product_tags pivot still uses created_by (the company who attached the tag),
-     *       while the tags table itself uses company_id (the company that owns the tag definition).
+     * ════════════════════════════════════════════════════════════════════
+     * ⚡ BULLETPROOF: Save tags to product_tags pivot table
+     * لا تنشئ tags جديدة أبداً
+     * ════════════════════════════════════════════════════════════════════
      */
     private function saveTagsToPivot(int $productId, array $tagIds, int $companyId): void
     {
-        // ════════════════════════════════════════════════════════════════════
-        // FIX: تنظيف الـ tagIds من أي duplicates أو قيم غير صالحة.
-        //
-        // السبب: في بعض الحالات (مثل تعديل منتج سوبر ادمن من قبل شركة) تصل
-        // tag_ids مكررة من الـ frontend (مثلاً نفس tag_id يظهر 2 أو 3 مرات).
-        // جدول product_tags يحتوي على unique constraint على
-        // (product_id, tag_id, created_by) → Duplicate entry error.
-        //
-        // الحل: array_unique + array_values + تصفية القيم غير الرقمية.
-        // ════════════════════════════════════════════════════════════════════
+        // 1) تنظيف الـ tagIds
         $tagIds = array_values(array_unique(
             array_filter($tagIds, fn($id) => !is_null($id) && $id !== '' && is_numeric($id))
         ));
 
+        if (empty($tagIds)) {
+            DB::table('product_tags')
+                ->where('product_id', $productId)
+                ->where('created_by', $companyId)
+                ->delete();
+            return;
+        }
+
+        // 2) ⚡ CRITICAL: تحقق إن كل tag_id موجود فعلاً في جدول tags
+        $intTagIds = array_map('intval', $tagIds);
+
+        $validTagIds = \App\Models\Tag::whereIn('id', $intTagIds)
+            ->visibleTo($companyId)
+            ->pluck('id')
+            ->toArray();
+
+        $invalidTagIds = array_diff($intTagIds, $validTagIds);
+
+        if (!empty($invalidTagIds)) {
+            Log::warning('ProductController: Filtered out invalid/inaccessible tag IDs', [
+                'product_id'     => $productId,
+                'company_id'     => $companyId,
+                'sent_tag_ids'   => $intTagIds,
+                'invalid_tag_ids'=> array_values($invalidTagIds),
+                'valid_tag_ids'  => $validTagIds,
+            ]);
+        }
+
+        // 3) احذف الربط السابق لهذه الشركة على هذا المنتج
         DB::table('product_tags')
             ->where('product_id', $productId)
             ->where('created_by', $companyId)
             ->delete();
 
-        if (empty($tagIds)) {
+        if (empty($validTagIds)) {
             return;
         }
 
+        // 4) أدرج الـ tags الصالحة فقط
         $insertData = [];
         $now = now();
-        foreach ($tagIds as $tagId) {
+        foreach ($validTagIds as $tagId) {
             $insertData[] = [
                 'product_id' => $productId,
                 'tag_id'     => (int) $tagId,
@@ -1804,7 +1672,47 @@ class ProductController extends Controller
                 'updated_at' => $now,
             ];
         }
-        DB::table('product_tags')->insert($insertData);
+
+        try {
+            DB::table('product_tags')->insert($insertData);
+        } catch (\Illuminate\Database\QueryException $e) {
+            if (str_contains($e->getMessage(), 'Duplicate entry')) {
+                Log::warning('ProductController: Duplicate tag pivot entry, inserting one by one', [
+                    'product_id' => $productId,
+                    'company_id' => $companyId,
+                ]);
+                foreach ($insertData as $row) {
+                    try {
+                        DB::table('product_tags')->insert($row);
+                    } catch (\Illuminate\Database\QueryException $e2) {
+                        if (!str_contains($e2->getMessage(), 'Duplicate entry')) {
+                            throw $e2;
+                        }
+                    }
+                }
+            } else {
+                throw $e;
+            }
+        }
+    }
+
+    /**
+     * ⚡ Helper: فلترة tag IDs صالحة فقط
+     */
+    private function filterValidTagIds(array $tagIds, int $companyId): array
+    {
+        $tagIds = array_values(array_filter($tagIds, fn($id) => !is_null($id) && $id !== '' && is_numeric($id)));
+
+        if (empty($tagIds)) {
+            return [];
+        }
+
+        $intTagIds = array_map('intval', $tagIds);
+
+        return \App\Models\Tag::whereIn('id', $intTagIds)
+            ->visibleTo($companyId)
+            ->pluck('id')
+            ->toArray();
     }
 
     /**
@@ -1812,12 +1720,10 @@ class ProductController extends Controller
      */
     private function syncPairsWellWith(int $productId, array $pairedIds, int $companyId): void
     {
-        // FIX: نفس تنظيف الـ duplicates المطبّق في saveTagsToPivot
         $pairedIds = array_values(array_unique(
             array_filter($pairedIds, fn($id) => !is_null($id) && $id !== '' && is_numeric($id))
         ));
 
-        // Remove existing pairs for this company
         DB::table('product_pairs')
             ->where('product_id', $productId)
             ->where('created_by', $companyId)
@@ -1827,11 +1733,9 @@ class ProductController extends Controller
             return;
         }
 
-        // Insert new pairs
         $insertData = [];
         $now = now();
         foreach ($pairedIds as $pairedId) {
-            // تجنّب الإقران الذاتي (المنتج مع نفسه)
             if ((int) $pairedId === (int) $productId) {
                 continue;
             }
@@ -1848,17 +1752,236 @@ class ProductController extends Controller
         }
     }
 
-    // =========================================================================
-    // =========== MERCHANT COMPARISON (Company User) ==========================
-    // =========================================================================
+    /**
+     * ════════════════════════════════════════════════════════════════════
+     * Helper: استخراج قيمة من $item بدعم multiple aliases للـ header
+     * ════════════════════════════════════════════════════════════════════
+     */
+    private function getHeaderValue(array $item, array $possibleKeys): ?string
+    {
+        foreach ($possibleKeys as $key) {
+            if (isset($item[$key]) && $item[$key] !== null && $item[$key] !== '') {
+                return $this->cleanImportValue($item[$key]);
+            }
+        }
+        return null;
+    }
 
     /**
-     * مقارنة بيانات الشركة مع بيانات السوبر ادمن
-     * يظهر الفروقات بين الـ Override والبيانات الأصلية
+     * ════════════════════════════════════════════════════════════════════
+     * ⚡ FIX: Find-or-Create Primary Indication — يستخدم forceFill لتجاوز $fillable
+     * ════════════════════════════════════════════════════════════════════
+     *
+     * المشكلة السابقة:
+     *   PrimaryIndication model عنده $fillable = ['name', 'slug'] فقط.
+     *   لما نستخدم PrimaryIndication::create($data)، Laravel بيوّلتر company_id
+     *   لأنها مش في $fillable → MySQL error: "Field 'company_id' doesn't have a default value"
+     *
+     * الحل:
+     *   استخدام forceFill() بدل create() لتجاوز $fillable restriction.
+     *   forceFill بيسمح بتعيين أي column حتى لو مش في $fillable.
      */
+    private function findOrCreateIndicationRobust(string $name): ?\App\Models\PrimaryIndication
+    {
+        $trimmed = trim($name);
+        if ($trimmed === '') return null;
+
+        try {
+            // 1) Case-insensitive lookup أولاً
+            $existing = \App\Models\PrimaryIndication::whereRaw('LOWER(name) = ?', [mb_strtolower($trimmed)])->first();
+            if ($existing) {
+                return $existing;
+            }
+
+            // 2) توليد slug آمن
+            $slug = Str::slug($trimmed);
+            if (empty($slug)) {
+                $slug = 'ind-' . substr(md5($trimmed), 0, 8);
+            }
+
+            // 3) ضمان فرادة الـ slug
+            $baseSlug = $slug;
+            $counter = 1;
+            while (\App\Models\PrimaryIndication::where('slug', $slug)->exists()) {
+                $slug = $baseSlug . '-' . $counter++;
+            }
+
+            // 4) بناء البيانات
+            $data = [
+                'name' => $trimmed,
+                'slug' => $slug,
+            ];
+
+            // ⚡ إضافة company_id و created_by و status لو الأعمدة موجودة
+            // (نستخدم Schema::getColumnListing بدل hasColumn لأنه أدق)
+            $columns = \Schema::getColumnListing('primary_indications');
+
+            if (in_array('company_id', $columns)) {
+                $data['company_id'] = getSuperAdminCompanyId();
+            }
+            if (in_array('created_by', $columns)) {
+                $data['created_by'] = getSuperAdminCompanyId();
+            }
+            if (in_array('status', $columns)) {
+                $data['status'] = 'active';
+            }
+
+            // ⚡ FIX: استخدام forceFill + save بدل create
+            // هذا يتجاوز $fillable restriction ويسمح بتعيين company_id
+            $indication = new \App\Models\PrimaryIndication();
+            $indication->forceFill($data)->save();
+
+            Log::info("Excel Import: Created new primary indication", [
+                'name'       => $trimmed,
+                'slug'       => $slug,
+                'id'         => $indication->id,
+                'company_id' => $data['company_id'] ?? null,
+            ]);
+
+            return $indication;
+
+        } catch (\Illuminate\Database\QueryException $qe) {
+            Log::warning("Excel Import: QueryException in findOrCreateIndication, retrying", [
+                'name'  => $trimmed,
+                'error' => $qe->getMessage(),
+            ]);
+
+            // Retry: ابحث مرة ثانية (يمكن تم إنشاؤه بواسطة process آخر)
+            $existing = \App\Models\PrimaryIndication::whereRaw('LOWER(name) = ?', [mb_strtolower($trimmed)])->first();
+            if ($existing) return $existing;
+
+            Log::error("Excel Import: Failed to find-or-create primary indication after retry", [
+                'name'  => $trimmed,
+                'error' => $qe->getMessage(),
+            ]);
+            return null;
+        } catch (\Exception $e) {
+            Log::error("Excel Import: Failed to find-or-create primary indication", [
+                'name'  => $trimmed,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Helper: استخراج bottle_size و bottle_size_unit
+     */
+    private function parseBottleSizeAndUnit($rawValue): array
+    {
+        $result = ['bottle_size' => null, 'bottle_size_unit' => null];
+
+        if (empty($rawValue)) return $result;
+
+        $value = trim((string) $rawValue);
+        $lower = strtolower($value);
+
+        if ($value === '' || $lower === 'none' || $lower === 'n/a' || $lower === 'null') {
+            return $result;
+        }
+
+        $pattern = '/^(\d+(?:\.\d+)?)\s*(fl\.?\s*oz|floz|oz|ml|milliliter|milliliters|caps|cap|capsule[s]?|caplet[s]?|tablet[s]?|softgel[s]?|gummies|gummy|g|grams|gram|bags|count|ct|pieces|pcs)\b/i';
+
+        if (preg_match($pattern, $value, $matches)) {
+            $result['bottle_size'] = (float) $matches[1];
+            $unit = strtolower(trim(preg_replace('/\s+/', ' ', $matches[2])));
+
+            if (in_array($unit, ['fl oz', 'fl. oz', 'fl.oz', 'floz', 'oz'])) {
+                $result['bottle_size_unit'] = 'oz';
+            } elseif (in_array($unit, ['ml', 'milliliter', 'milliliters'])) {
+                $result['bottle_size_unit'] = 'ml';
+            } elseif (in_array($unit, ['cap', 'caps', 'capsule', 'capsules'])) {
+                $result['bottle_size_unit'] = 'caps';
+            } elseif (in_array($unit, ['caplet', 'caplets', 'tablet', 'tablets'])) {
+                $result['bottle_size_unit'] = 'tablets';
+            } elseif (in_array($unit, ['softgel', 'softgels'])) {
+                $result['bottle_size_unit'] = 'softgels';
+            } elseif (in_array($unit, ['gummy', 'gummies'])) {
+                $result['bottle_size_unit'] = 'gummies';
+            } elseif (in_array($unit, ['g', 'gram', 'grams'])) {
+                $result['bottle_size_unit'] = 'g';
+            } elseif (in_array($unit, ['bags'])) {
+                $result['bottle_size_unit'] = 'bags';
+            } elseif (in_array($unit, ['count', 'ct', 'pieces', 'pcs'])) {
+                $result['bottle_size_unit'] = 'count';
+            } else {
+                $result['bottle_size_unit'] = $unit;
+            }
+        } else {
+            if (preg_match('/^(\d+(?:\.\d+)?)$/', $value)) {
+                $result['bottle_size'] = (float) $value;
+            } elseif (preg_match('/^[a-zA-Z\s\.]+$/', $value)) {
+                $unit = strtolower(trim($value));
+                if (in_array($unit, ['caps', 'cap', 'capsule'])) {
+                    $result['bottle_size_unit'] = 'caps';
+                } elseif (in_array($unit, ['oz', 'fl oz', 'fl.oz'])) {
+                    $result['bottle_size_unit'] = 'oz';
+                } elseif ($unit === 'ml') {
+                    $result['bottle_size_unit'] = 'ml';
+                } else {
+                    $result['bottle_size_unit'] = $unit;
+                }
+            } else {
+                $result['bottle_size'] = $value;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * مقارنة قيمتين لمعرفة هل تختلفان فعلاً (للاستيراد)
+     */
+    private function isFieldDifferent($current, $new): bool
+    {
+        return $this->normalizeForImportCompare($current)
+            !== $this->normalizeForImportCompare($new);
+    }
+
+    /**
+     * تطبيع القيمة للمقارنة في الاستيراد
+     */
+    private function normalizeForImportCompare($value)
+    {
+        if ($value === null || $value === '' || $value === []) {
+            return '';
+        }
+
+        if (is_bool($value)) {
+            return $value ? '1' : '0';
+        }
+        if (is_string($value)) {
+            $lower = strtolower(trim($value));
+            if ($lower === 'true' || $lower === '1') {
+                return '1';
+            }
+            if ($lower === 'false' || $lower === '0') {
+                return '0';
+            }
+        }
+
+        if (is_array($value)) {
+            $normalized = array_map(function ($v) {
+                return is_string($v) ? trim($v) : $v;
+            }, $value);
+            $normalized = array_filter($normalized, fn($v) => $v !== '' && $v !== null);
+            sort($normalized);
+            return implode('|', $normalized);
+        }
+
+        if (is_numeric($value)) {
+            return (string) floatval($value);
+        }
+
+        return trim((string) $value);
+    }
+
+    // =========================================================================
+    // =========== MERCHANT COMPARISON =========================================
+    // =========================================================================
+
     public function merchantCompareResults()
     {
-        // فقط صاحب الشركة يقدر يشوف المقارنة
         if (auth()->user()->isSuperAdmin()) {
             return redirect()->route('products.index')->with('error', __('This feature is for company users only.'));
         }
@@ -1866,7 +1989,6 @@ class ProductController extends Controller
         $currentCompanyId = createdBy();
         $superAdminId = getSuperAdminCompanyId();
 
-        // جلب كل الـ overrides لهذه الشركة على منتجات السوبر ادمن
         $overrides = ProductCompanyOverride::where('company_id', $currentCompanyId)
             ->whereHas('product', function ($q) use ($superAdminId) {
                 $q->where('created_by', $superAdminId);
@@ -1884,9 +2006,6 @@ class ProductController extends Controller
             $baseHealthProduct = $product->healthProduct()->where('created_by', $superAdminId)->first();
             $changes = [];
 
-            // ============ مقارنة حقول المنتج (products table) ============
-
-            // السعر
             if ($override->price_override !== null) {
                 $changes[] = [
                     'override_id' => $override->id,
@@ -1897,7 +2016,6 @@ class ProductController extends Controller
                 ];
             }
 
-            // سعر التخفيض
             if ($override->sale_price_override !== null) {
                 $changes[] = [
                     'override_id' => $override->id,
@@ -1908,7 +2026,6 @@ class ProductController extends Controller
                 ];
             }
 
-            // كمية المخزون
             if ($override->stock_quantity_override !== null) {
                 $changes[] = [
                     'override_id' => $override->id,
@@ -1919,7 +2036,6 @@ class ProductController extends Controller
                 ];
             }
 
-            // حالة المخزون
             if ($override->stock_status_override !== null) {
                 $changes[] = [
                     'override_id' => $override->id,
@@ -1930,7 +2046,6 @@ class ProductController extends Controller
                 ];
             }
 
-            // الوصف
             if ($override->description !== null) {
                 $changes[] = [
                     'override_id' => $override->id,
@@ -1941,7 +2056,6 @@ class ProductController extends Controller
                 ];
             }
 
-            // التصنيف
             if ($override->category_id !== null) {
                 $originalCategory = $product->category?->name ?? '—';
                 $merchantCategory = \App\Models\Category::find($override->category_id)?->name ?? '—';
@@ -1954,9 +2068,6 @@ class ProductController extends Controller
                 ];
             }
 
-            // ============ مقارنة حقول الصحة (health_products table) ============
-
-            // موانع الاستعمال
             if ($override->contraindications !== null) {
                 $changes[] = [
                     'override_id' => $override->id,
@@ -1967,7 +2078,6 @@ class ProductController extends Controller
                 ];
             }
 
-            // روابط الأبحاث
             if ($override->research_links !== null) {
                 $changes[] = [
                     'override_id' => $override->id,
@@ -1978,7 +2088,6 @@ class ProductController extends Controller
                 ];
             }
 
-            // المؤشرات الرئيسية
             if ($override->primary_indications !== null && !empty($override->primary_indications)) {
                 $originalIndications = $baseHealthProduct?->primary_indications
                     ? (is_array($baseHealthProduct->primary_indications)
@@ -1997,7 +2106,6 @@ class ProductController extends Controller
                 ];
             }
 
-            // حقول الجرعات
             $dosingFields = [
                 'dosing_upon_rising'      => __('Upon Rising'),
                 'dosing_breakfast'        => __('Breakfast'),
@@ -2020,7 +2128,6 @@ class ProductController extends Controller
                 }
             }
 
-            // Dosing N/A
             if ($override->dosing_na !== null) {
                 $changes[] = [
                     'override_id'    => $override->id,
@@ -2031,25 +2138,22 @@ class ProductController extends Controller
                 ];
             }
 
-            // ============ حقول حصرية للشركة (لا توجد في بيانات السوبر ادمن) ============
-
-            // ملاحظات الممارس
-            if ($override->practitioner_notes !== null) {
+            // practitioner_notes و custom_* الآن في health_products
+            if ($baseHealthProduct?->practitioner_notes !== null) {
                 $changes[] = [
                     'override_id'    => $override->id,
                     'field_name'     => 'practitioner_notes',
                     'label'          => __('Practitioner Notes'),
                     'original_value' => null,
-                    'merchant_value' => $override->practitioner_notes,
+                    'merchant_value' => $baseHealthProduct->practitioner_notes,
                     'is_exclusive'   => true,
                 ];
             }
 
-            // مؤشرات رئيسية مخصصة
-            if ($override->custom_primary_indications !== null && !empty($override->custom_primary_indications)) {
-                $merchantValue = is_array($override->custom_primary_indications)
-                    ? implode(', ', $override->custom_primary_indications)
-                    : $override->custom_primary_indications;
+            if (!empty($baseHealthProduct?->custom_primary_indications)) {
+                $merchantValue = is_array($baseHealthProduct->custom_primary_indications)
+                    ? implode(', ', $baseHealthProduct->custom_primary_indications)
+                    : $baseHealthProduct->custom_primary_indications;
                 $changes[] = [
                     'override_id'    => $override->id,
                     'field_name'     => 'custom_primary_indications',
@@ -2060,14 +2164,13 @@ class ProductController extends Controller
                 ];
             }
 
-            // ملاحظات الجرعات المخصصة
-            if ($override->custom_dosing_notes !== null) {
+            if ($baseHealthProduct?->custom_dosing_notes !== null) {
                 $changes[] = [
                     'override_id'    => $override->id,
                     'field_name'     => 'custom_dosing_notes',
                     'label'          => __('Custom Dosing Notes'),
                     'original_value' => null,
-                    'merchant_value' => $override->custom_dosing_notes,
+                    'merchant_value' => $baseHealthProduct->custom_dosing_notes,
                     'is_exclusive'   => true,
                 ];
             }
@@ -2089,10 +2192,6 @@ class ProductController extends Controller
         ]);
     }
 
-    /**
-     * إرجاع حقل معين من الـ Override لقيمته الأصلية
-     * يعمل null للحقل = الرجوع لقيمة السوبر ادمن
-     */
     public function merchantRevertField(Request $request)
     {
         $request->validate([
@@ -2102,7 +2201,6 @@ class ProductController extends Controller
 
         $override = ProductCompanyOverride::findOrFail($request->id);
 
-        // التحقق إن الـ Override يخص الشركة الحالية
         if ($override->company_id !== createdBy()) {
             return response()->json([
                 'flag' => 'error',
@@ -2112,7 +2210,6 @@ class ProductController extends Controller
 
         $fieldName = $request->field_name;
 
-        // قائمة الحقول المسموح بإرجاعها
         $revertibleFields = [
             'price_override',
             'sale_price_override',
@@ -2131,9 +2228,6 @@ class ProductController extends Controller
             'dosing_dinner',
             'dosing_before_sleep',
             'dosing_na',
-            'practitioner_notes',
-            'custom_primary_indications',
-            'custom_dosing_notes',
         ];
 
         if (!in_array($fieldName, $revertibleFields)) {
@@ -2143,7 +2237,6 @@ class ProductController extends Controller
             ]);
         }
 
-        // إرجاع الحقل لـ null = استخدام قيمة السوبر ادمن الأصلية
         $override->$fieldName = null;
         $override->save();
 
@@ -2154,13 +2247,9 @@ class ProductController extends Controller
     }
 
     // =========================================================================
-    // =========== PROVIDER COMPARISON (Super Admin) ==========================
+    // =========== PROVIDER COMPARISON ========================================
     // =========================================================================
 
-    /**
-     * مقارنة البيانات المحلية مع بيانات المزود الخارجي
-     * فقط السوبر ادمن
-     */
     public function compareWithProvider()
     {
         if (!auth()->user()->isSuperAdmin()) {
@@ -2173,7 +2262,6 @@ class ProductController extends Controller
                 return redirect()->back()->with('error', __('Provider API URL is not configured.'));
             }
 
-            // إضافة timestamp لمنع التخزين المؤقت
             $liveUrl = $providerApiUrl . '&t=' . time();
             $response = \Illuminate\Support\Facades\Http::timeout(120)->get($liveUrl);
 
@@ -2187,7 +2275,6 @@ class ProductController extends Controller
                 return redirect()->back()->with('error', __('No data found from provider.'));
             }
 
-            // مسح بيانات المقارنة القديمة
             ProductComparison::truncate();
 
             $changesDetected  = 0;
@@ -2217,7 +2304,6 @@ class ProductController extends Controller
                 $processedProducts++;
                 $productName = $product->name;
 
-                // 1. مقارنة السعر
                 $apiPrice = floatval($apiProduct['regular_price'] ?? 0);
                 $localPrice = floatval($product->price ?? 0);
 
@@ -2234,7 +2320,6 @@ class ProductController extends Controller
                     $changesDetected++;
                 }
 
-                // 2. مقارنة الوزن
                 $apiWeight = floatval($apiProduct['weight'] ?? 0);
                 $localWeight = floatval($product->product_weight ?? 0);
 
@@ -2251,7 +2336,6 @@ class ProductController extends Controller
                     $changesDetected++;
                 }
 
-                // 3. مقارنة الاسم
                 $apiName = trim($apiProduct['name'] ?? '');
                 $localName = trim($product->name ?? '');
 
@@ -2268,7 +2352,6 @@ class ProductController extends Controller
                     $changesDetected++;
                 }
 
-                // 4. مقارنة حالة المخزون
                 $stockStatusMap = [
                     'instock'     => 'in_stock',
                     'outofstock'  => 'out_of_stock',
@@ -2290,7 +2373,6 @@ class ProductController extends Controller
                     $changesDetected++;
                 }
 
-                // 5. مقارنة الوصف
                 $apiDescription = trim($apiProduct['description'] ?? '');
                 $localDescription = trim($product->description ?? '');
 
@@ -2307,7 +2389,6 @@ class ProductController extends Controller
                     $changesDetected++;
                 }
 
-                // 6. مقارنة الصورة
                 $apiImageUrl = null;
                 if (!empty($apiProduct['images']) && is_array($apiProduct['images'])) {
                     $firstImage = $apiProduct['images'][0] ?? null;
@@ -2350,9 +2431,6 @@ class ProductController extends Controller
         }
     }
 
-    /**
-     * عرض نتائج مقارنة المزود
-     */
     public function providerComparisonResults()
     {
         if (!auth()->user()->isSuperAdmin()) {
@@ -2373,9 +2451,6 @@ class ProductController extends Controller
         ]);
     }
 
-    /**
-     * قبول تغيير واحد من المقارنة
-     */
     public function acceptComparison($id)
     {
         if (!auth()->user()->isSuperAdmin()) {
@@ -2408,9 +2483,6 @@ class ProductController extends Controller
         }
     }
 
-    /**
-     * رفض تغيير واحد من المقارنة
-     */
     public function rejectComparison($id)
     {
         if (!auth()->user()->isSuperAdmin()) {
@@ -2432,9 +2504,6 @@ class ProductController extends Controller
         }
     }
 
-    /**
-     * قبول كل التغييرات لمنتج معين
-     */
     public function acceptAllProductChanges($productId)
     {
         if (!auth()->user()->isSuperAdmin()) {
@@ -2470,9 +2539,6 @@ class ProductController extends Controller
         }
     }
 
-    /**
-     * رفض كل التغييرات لمنتج معين
-     */
     public function rejectAllProductChanges($productId)
     {
         if (!auth()->user()->isSuperAdmin()) {
@@ -2497,9 +2563,6 @@ class ProductController extends Controller
     // =========== COMPARISON HELPER METHODS ===================================
     // =========================================================================
 
-    /**
-     * تطبيق تغيير حقل على المنتج / منتج الصحة
-     */
     private function applyFieldChange($product, $healthProduct, $fieldName, $newValue)
     {
         switch ($fieldName) {
@@ -2526,7 +2589,6 @@ class ProductController extends Controller
                 break;
 
             default:
-                // لباقي الحقول (name, price, sale_price, description)
                 if (Schema::hasColumn('products', $fieldName)) {
                     $product->$fieldName = $newValue;
                     $product->save();
@@ -2535,9 +2597,6 @@ class ProductController extends Controller
         }
     }
 
-    /**
-     * حذف المقارنات المحلولة لمنتج معين
-     */
     private function cleanUpResolvedProduct($productId)
     {
         $pendingCount = ProductComparison::where('product_id', $productId)
@@ -2549,9 +2608,6 @@ class ProductController extends Controller
         }
     }
 
-    /**
-     * فحص هل القيمتين مختلفتين فعلاً
-     */
     private function isActuallyDifferent($oldValue, $newValue)
     {
         $oldNormalized = $this->normalizeForComparison($oldValue);
@@ -2564,9 +2620,6 @@ class ProductController extends Controller
         return $oldNormalized !== $newNormalized;
     }
 
-    /**
-     * تطبيع القيمة للمقارنة
-     */
     private function normalizeForComparison($value)
     {
         if (is_null($value)) {
@@ -2587,31 +2640,19 @@ class ProductController extends Controller
     // =========================================================================
     // =========== getCurrentCompanySlug ======================================
     // =========================================================================
-    // FIX: يرجع slug الشركة صاحبة التعديل. يُستخدم في رسائل الـ RabbitMQ
-    // لكي يعرف الـ desktop app أي شركة قامت بالتعديل/الإنشاء.
-    //
-    // ترتيب البحث:
-    //   1) auth()->user()->slug           (إذا كان للمستخدم نفسه slug مباشر)
-    //   2) auth()->user()->company->slug  (إذا كان للمستخدم علاقة company)
-    //   3) Company::find($currentCompanyId)->slug  (بحث مباشر في جدول companies)
-    //   4) auth()->user()->username / store_slug  (حقول احتياطية شائعة)
-    //   5) null                            (إذا فشل كل ما سبق)
-    // =========================================================================
+
     private function getCurrentCompanySlug(?int $currentCompanyId = null): ?string
     {
         $user = auth()->user();
 
-        // (1) slug على المستخدم نفسه
         if ($user && isset($user->slug) && !empty($user->slug)) {
             return (string) $user->slug;
         }
 
-        // (2) علاقة company على المستخدم
         if ($user && method_exists($user, 'company') && $user->company && !empty($user->company->slug)) {
             return (string) $user->company->slug;
         }
 
-        // (3) بحث مباشر في جدول companies باستخدام created_by الحالي
         if ($currentCompanyId) {
             try {
                 $companyRow = \DB::table('companies')->where('id', $currentCompanyId)->first();
@@ -2623,7 +2664,6 @@ class ProductController extends Controller
             }
         }
 
-        // (4) حقول احتياطية شائعة على جدول users
         if ($user) {
             foreach (['username', 'store_slug', 'company_slug'] as $fallbackField) {
                 if (isset($user->{$fallbackField}) && !empty($user->{$fallbackField})) {
@@ -2639,53 +2679,4 @@ class ProductController extends Controller
 
         return null;
     }
-
-        /**
-     * ════════════════════════════════════════════════════════════════════
-     * مقارنة قيمتين لمعرفة هل تختلفان فعلاً (للاستيراد)
-     * ════════════════════════════════════════════════════════════════════
-     * - null و '' يُعتبران متساويين
-     * - الأرقام تُقارن كـ float
-     * - المصفوفات تُقارن بعد sort
-     * - النصوص تُقارن بعد trim
-     *
-     * @param mixed $current
-     * @param mixed $new
-     * @return bool true لو مختلفان
-     */
-    private function isFieldDifferent($current, $new): bool
-    {
-        return $this->normalizeForImportCompare($current)
-            !== $this->normalizeForImportCompare($new);
-    }
-
-    /**
-     * تطبيع القيمة للمقارنة في الاستيراد.
-     */
-    private function normalizeForImportCompare($value)
-    {
-        // null أو فارغ → ''
-        if ($value === null || $value === '') {
-            return '';
-        }
-
-        // مصفوفة (مثل primary_indications أو custom_primary_indications)
-        if (is_array($value)) {
-            $normalized = array_map(function ($v) {
-                return is_string($v) ? trim($v) : $v;
-            }, $value);
-            $normalized = array_filter($normalized, fn($v) => $v !== '' && $v !== null);
-            sort($normalized);
-            return implode('|', $normalized);
-        }
-
-        // رقمي → float للمقارنة الدقيقة (10.00 == 10)
-        if (is_numeric($value)) {
-            return (string) floatval($value);
-        }
-
-        // نص
-        return trim((string) $value);
-    }
-
 }

@@ -8,26 +8,15 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 /**
- * HealthProduct — UPDATED for Many-to-Many Primary Indications
+ * HealthProduct — UPDATED
  *
  * ────────────────────────────────────────────────────────────────────────
- * ما تغيّر:
+ * آخر تحديث:
  * ────────────────────────────────────────────────────────────────────────
- * - العمود `primary_indications` يبقى في قاعدة البيانات لأغراض التوافق،
- *   لكنه يُعتبر "deprecated" — لا تقرأ منه ولا تكتب إليه في الكود الجديد.
- * - تم حذفه من $fillable و $casts (لمنع الكتابة إليه عن طريق الخطأ).
- * - تم إضافة علاقة belongsToMany مع PrimaryIndication عبر المنتج المرتبط.
- * - تم إضافة accessor `primary_indications` (مُعاد تعريفه) يقرأ من العلاقة
- *   الجديدة بدلاً من الـ JSON القديم. هذا يحافظ على عمل أي كود قديم يصل
- *   عبر `$healthProduct->primary_indications` لكنه يرجع البيانات الصحيحة.
- *
- * ────────────────────────────────────────────────────────────────────────
- * مهم عند الدمج مع الكود الأصلي:
- * ────────────────────────────────────────────────────────────────────────
- *   1. احذف `'primary_indications'` من $fillable.
- *   2. احذف `'primary_indications' => 'array'` من $casts.
- *   3. أضِف الكود في القسم "NEW: Many-to-Many Primary Indications".
- *   4. احتفظ بجميع العلاقات والـ accessors الـ existing الأخرى كما هي.
+ * - تمت إضافة حقل `practitioner_notes` إلى $fillable (نُقل من ProductCompanyOverride).
+ * - تمت إضافة حقلَي `custom_primary_indications` و `custom_dosing_notes`
+ *   (نُقلا من ProductCompanyOverride إلى هنا).
+ * - العمود `primary_indications` القديم ما يزال deprecated — استخدم العلاقة belongsToMany.
  * ────────────────────────────────────────────────────────────────────────
  */
 class HealthProduct extends Model
@@ -48,7 +37,6 @@ class HealthProduct extends Model
         'product_image_url',
 
         // Content & Descriptions
-        // ⚠️ تم إزالة: 'primary_indications' — لم يعد يُستخدم
         'ingredients',
         'contraindications',
         'research_links',
@@ -56,6 +44,13 @@ class HealthProduct extends Model
         // Additional Info
         'supports',
         'useful_for',
+
+        // ⚡ NEW: Practitioner Notes (نُقل من ProductCompanyOverride)
+        'practitioner_notes',
+
+        // ⚡ NEW: Custom fields (نُقلا من ProductCompanyOverride)
+        'custom_primary_indications',
+        'custom_dosing_notes',
 
         // Dosing Schedule
         'dosing_upon_rising',
@@ -72,14 +67,14 @@ class HealthProduct extends Model
     ];
 
     protected $casts = [
-        // ⚠️ تم إزالة: 'primary_indications' => 'array'
-        'dosing_na'   => 'boolean',
-        'created_at'  => 'datetime',
-        'updated_at'  => 'datetime',
+        'dosing_na'                    => 'boolean',
+        'custom_primary_indications'   => 'array',
+        'created_at'                   => 'datetime',
+        'updated_at'                   => 'datetime',
     ];
 
     // =========================================================================
-    // =========== Relationships (existing — keep as-is) =====================
+    // =========== Relationships =============================================
     // =========================================================================
 
     public function product(): BelongsTo
@@ -99,65 +94,37 @@ class HealthProduct extends Model
     }
 
     // =========================================================================
-    // =========== NEW: Many-to-Many Primary Indications =====================
+    // =========== Many-to-Many Primary Indications ==========================
     // =========================================================================
 
-    /**
-     * العلاقة Many-to-Many مع PrimaryIndication (عبر المنتج المرتبط).
-     *
-     * يستخدم هذا للتغلب على حقيقة أن الـ primary_indications مرتبطة
-     * بالـ Product وليس بـ HealthProduct مباشرة.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany
-     */
     public function primaryIndications(): BelongsToMany
     {
-        // نمر عبر المنتج للوصول إلى pivot
         return $this->product->primaryIndications();
     }
 
-    /**
-     * Accessor: primary_indications كـ array من الأسماء.
-     *
-     * هذا الـ accessor يحل محل قراءة الـ JSON القديم من قاعدة البيانات.
-     * الكود القديم الذي يستخدم `$healthProduct->primary_indications`
-     * سيستمر في العمل لكنه يجلب البيانات من العلاقة الجديدة.
-     *
-     * @return array<string>
-     */
     public function getPrimaryIndicationsAttribute(): array
     {
-        // لو الـ product غير محمّل، ارجع []
         if (!$this->product_id) {
             return [];
         }
-
-        // استخدم العلاقة عبر المنتج
         if ($this->relationLoaded('product') && $this->product) {
             return $this->product->primaryIndications()
                 ->pluck('name')
                 ->toArray();
         }
-
-        // fallback لو product غير محمّل — استعلم مباشرة
         return \App\Models\PrimaryIndication::whereHas('products', function ($q) {
             $q->where('products.id', $this->product_id);
         })->pluck('name')->toArray();
     }
 
-    /**
-     * Accessor (قديم - تم استبداله): نص الـ indications مفصول بفواصل.
-     *
-     * @return string
-     */
     public function getIndicationsStringAttribute(): string
     {
-        $names = $this->primary_indications; // يستخدم الـ accessor الجديد
+        $names = $this->primary_indications;
         return !empty($names) ? implode(', ', $names) : '';
     }
 
     // =========================================================================
-    // =========== Existing Accessors (keep as-is) ============================
+    // =========== Accessors =================================================
     // =========================================================================
 
     public function getDosingScheduleAttribute(): ?array
@@ -165,7 +132,6 @@ class HealthProduct extends Model
         if ($this->dosing_na) {
             return null;
         }
-
         $schedule = [];
         if (!empty($this->dosing_upon_rising))      $schedule['upon_rising']      = $this->dosing_upon_rising;
         if (!empty($this->dosing_breakfast))         $schedule['breakfast']        = $this->dosing_breakfast;
@@ -174,7 +140,6 @@ class HealthProduct extends Model
         if (!empty($this->dosing_between_meals_pm))  $schedule['between_meals_pm'] = $this->dosing_between_meals_pm;
         if (!empty($this->dosing_dinner))            $schedule['dinner']           = $this->dosing_dinner;
         if (!empty($this->dosing_before_sleep))      $schedule['before_sleep']     = $this->dosing_before_sleep;
-
         return !empty($schedule) ? $schedule : null;
     }
 
@@ -187,7 +152,7 @@ class HealthProduct extends Model
     }
 
     // =========================================================================
-    // =========== Existing Scopes (keep as-is) ===============================
+    // =========== Scopes ====================================================
     // =========================================================================
 
     public function scopeWithContraindications($query)
@@ -221,10 +186,11 @@ class HealthProduct extends Model
               ->orWhere('ingredients', 'like', "%{$term}%")
               ->orWhere('supports', 'like', "%{$term}%")
               ->orWhere('useful_for', 'like', "%{$term}%")
+              ->orWhere('practitioner_notes', 'like', "%{$term}%")
+              ->orWhere('custom_dosing_notes', 'like', "%{$term}%")
               ->orWhereHas('product', function ($pq) use ($term) {
                   $pq->where('name', 'like', "%{$term}%");
               })
-              // NEW: بحث في الـ primary indications عبر العلاقة الجديدة
               ->orWhereHas('product.primaryIndications', function ($piq) use ($term) {
                   $piq->where('name', 'like', "%{$term}%");
               });
@@ -241,7 +207,7 @@ class HealthProduct extends Model
     }
 
     // =========================================================================
-    // =========== Existing Helper Methods (keep as-is) =======================
+    // =========== Helper Methods ============================================
     // =========================================================================
 
     public function hasPregnancyWarning(): bool

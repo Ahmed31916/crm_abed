@@ -325,8 +325,6 @@ export default function ProductEdit() {
         sale_price: (isLocked ? getEffectiveValue('sale_price_override', product.sale_price || '') : (product.sale_price?.toString() || ''))?.toString() || '',
         category_id: (() => {
             const v = getEffectiveValue('category_id', product.category_id?.toString() || '');
-            // Normalize: integer IDs come back as numbers from the controller —
-            // convert to string so they match SelectItem value="id.toString()"
             return v === null || v === undefined ? '' : String(v);
         })(),
         brand_id: product.brand_id?.toString() || '',
@@ -342,6 +340,7 @@ export default function ProductEdit() {
         // ===== Product Form & Size =====
         product_form: healthProduct?.product_form || '',
         bottle_size: healthProduct?.bottle_size?.toString() || '',
+        bottle_size_unit: healthProduct?.bottle_size_unit || '',
         product_image_url: healthProduct?.product_image_url || '',
 
         // ===== Full Name =====
@@ -369,37 +368,30 @@ export default function ProductEdit() {
         pairs_well_with: (product.pairs_well_with_ids || []).map((id: number) => id.toString()),
 
         // ===== Primary Indications =====
-        // ⚡ UPDATED: primary_indications = array of IDs (strings)
-        // - For normal products (super admin or company's own): use product.primary_indications_ids
-        // - For locked products (company editing super admin's): use override->primary_indications (array of names) and convert to IDs
         primary_indications: (() => {
-            // 1) لو override موجود وعنده primary_indications (array of names)
             if (isLocked && override?.primary_indications && Array.isArray(override.primary_indications) && override.primary_indications.length > 0) {
-                // حوّل الأسماء إلى IDs
                 return override.primary_indications
                     .map((name: string) => primaryIndicationNameToId.get(String(name).toLowerCase()))
                     .filter((id: string | undefined): id is string => !!id);
             }
-
-            // 2) المنتج عنده primary_indications_ids (array of IDs from controller)
             if (Array.isArray(product.primary_indications_ids)) {
                 return product.primary_indications_ids.map((id: number) => id.toString());
             }
-
-            // 3) Fallback: لو الـ healthProduct الحالي لا يزال يرجع أسماء (legacy)
             if (Array.isArray(healthProduct?.primary_indications)) {
                 return (healthProduct.primary_indications as string[])
                     .map((name: string) => primaryIndicationNameToId.get(String(name).toLowerCase()))
                     .filter((id: string | undefined): id is string => !!id);
             }
-
             return [] as string[];
         })(),
 
-        // ===== Practitioner / Company Override Exclusive =====
-        practitioner_notes: override?.practitioner_notes || '',
-        custom_primary_indications: override?.custom_primary_indications || [],
-        custom_dosing_notes: override?.custom_dosing_notes || '',
+        // ═══════════════════════════════════════════════════════════════
+        // ⚡ CHANGED: Practitioner Notes + Custom fields now from healthProduct
+        // (نُقلت من product_company_overrides إلى health_products)
+        // ═══════════════════════════════════════════════════════════════
+        practitioner_notes: healthProduct?.practitioner_notes || '',
+        custom_primary_indications: healthProduct?.custom_primary_indications || [],
+        custom_dosing_notes: healthProduct?.custom_dosing_notes || '',
 
         // ===== Images =====
         main_image_id: validMainImageId as number | null,
@@ -426,14 +418,12 @@ export default function ProductEdit() {
     }, [tags]);
 
     const primaryIndicationOptions: MultiSelectOption[] = useMemo(() => {
-        // ⚡ Changed: value = ID (number as string) instead of name
         return (primaryIndications ?? []).map((ind: { id: number; name: string }) => ({
             value: ind.id.toString(),
             label: ind.name,
         }));
     }, [primaryIndications]);
 
-    // خريطة ID → name لعرض الباجات تحت الـ MultiSelect
     const primaryIndicationIdToName = useMemo(() => {
         const m = new Map<string, string>();
         (primaryIndications ?? []).forEach((ind: { id: number; name: string }) => {
@@ -494,6 +484,29 @@ export default function ProductEdit() {
             Object.entries(clientErrors).forEach(([key, msg]) => setError(key as any, msg));
             return;
         }
+
+        // ═══════════════════════════════════════════════════════════
+        // ⚡ CRITICAL FIX: فلترة tag_id قبل الإرسال
+        //   - تأكد إن كل ID هو رقم صحيح
+        //   - تأكد إن الـ ID موجود في قائمة الـ options المتاحة
+        //   - هذا يمنع إرسال IDs غير صالحة للـ backend
+        // ═══════════════════════════════════════════════════════════
+        const validTagIdSet = new Set(tagOptions.map(opt => opt.value));
+        const sanitizedTagIds = (data.tag_id as string[]).filter(id =>
+            id && !isNaN(Number(id)) && validTagIdSet.has(id.toString())
+        );
+
+        // لو فيه فرق، سجل في console للتشخيص
+        if (sanitizedTagIds.length !== data.tag_id.length) {
+            console.warn('Filtered out invalid tag IDs before submit:', {
+                original: data.tag_id,
+                sanitized: sanitizedTagIds,
+                removed: data.tag_id.filter(id => !validTagIdSet.has(id.toString())),
+            });
+        }
+
+        // حدّث data.tag_id بالقيم المصفاة
+        setData('tag_id', sanitizedTagIds);
 
         toast.loading(t('Updating product...'));
 
@@ -627,7 +640,6 @@ export default function ProductEdit() {
                                                     )}
                                                 </SelectContent>
                                             </Select>
-                                            {/* Diagnostic hint: show when value is set but not in the list (data integrity issue) */}
                                             {data.category_id && categories?.length > 0 && !categories.some((c: any) => c.id.toString() === data.category_id) && (
                                                 <p className="text-xs text-amber-600">
                                                     {t('Selected category (ID')} {data.category_id} {t(') no longer exists. Please choose another.')}
@@ -644,8 +656,8 @@ export default function ProductEdit() {
                                     />
                                 </div>
 
-                                {/* Product Form + Bottle Size + Brand */}
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                {/* Product Form + Bottle Size + Unit + Brand */}
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                                     {isLocked ? (
                                         <LockedField label={t('Product Form')} value={data.product_form} />
                                     ) : (
@@ -663,20 +675,15 @@ export default function ProductEdit() {
                                                 </SelectContent>
                                             </Select>
                                             {errors.product_form && <p className="text-xs text-red-500">{errors.product_form}</p>}
-                                            {data.product_form && (
-                                                <p className="text-xs text-muted-foreground">
-                                                    {data.product_form === 'Liquid' ? t('Unit: oz') : t('Unit: caps')}
-                                                </p>
-                                            )}
                                         </div>
                                     )}
 
                                     {isLocked ? (
-                                        <LockedField label={t('Bottle Size / Count')} value={data.bottle_size} />
+                                        <LockedField label={t('Bottle Size')} value={data.bottle_size} />
                                     ) : (
                                         <div className="space-y-2">
                                             <Label htmlFor="bottle_size" className="text-sm font-medium" required>
-                                                {t('Bottle Size / Count')}
+                                                {t('Bottle Size')}
                                             </Label>
                                             <Input
                                                 id="bottle_size"
@@ -690,6 +697,32 @@ export default function ProductEdit() {
                                             {errors.bottle_size && <p className="text-xs text-red-500">{errors.bottle_size}</p>}
                                         </div>
                                     )}
+
+                                    {/* ⚡ NEW: Bottle Size Unit */}
+                                    <div className="space-y-2">
+                                        <Label htmlFor="bottle_size_unit" className="text-sm font-medium">
+                                            {t('Unit')}
+                                        </Label>
+                                        <Select
+                                            value={data.bottle_size_unit}
+                                            onValueChange={(value) => handleInputChange('bottle_size_unit', value)}
+                                        >
+                                            <SelectTrigger>
+                                                <SelectValue placeholder={t('Select unit')} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="oz">{t('oz')}</SelectItem>
+                                                <SelectItem value="ml">{t('ml')}</SelectItem>
+                                                <SelectItem value="caps">{t('caps')}</SelectItem>
+                                                <SelectItem value="tablets">{t('tablets')}</SelectItem>
+                                                <SelectItem value="softgels">{t('softgels')}</SelectItem>
+                                                <SelectItem value="gummies">{t('gummies')}</SelectItem>
+                                                <SelectItem value="g">{t('g')}</SelectItem>
+                                                <SelectItem value="bags">{t('bags')}</SelectItem>
+                                                <SelectItem value="count">{t('count')}</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
 
                                     {isLocked ? (
                                         <LockedField label={t('Supplier / Brand')} value={brands?.find((b: any) => b.id.toString() === data.brand_id)?.name || ''} />
@@ -1239,9 +1272,10 @@ export default function ProductEdit() {
                                     <Stethoscope className="h-5 w-5" />
                                     {t('Practitioner Notes & Customizations')}
                                 </CardTitle>
-                                <CardDescription>{t('Visible only to your store customers')}</CardDescription>
+                                <CardDescription>{t('Stored on the health product record')}</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4 pt-4">
+                                {/* ⚡ CHANGED: practitioner_notes now from healthProduct */}
                                 <div className="space-y-2">
                                     <Label htmlFor="practitioner_notes" className="text-sm font-medium">{t('Practitioner Notes')}</Label>
                                     <Textarea
@@ -1251,9 +1285,10 @@ export default function ProductEdit() {
                                         rows={3}
                                         placeholder={t('Add notes for your practitioners about this product...')}
                                     />
-                                    <p className="text-xs text-muted-foreground">{t('Visible only to your store customers')}</p>
+                                    <p className="text-xs text-muted-foreground">{t('Stored on the health product record')}</p>
                                 </div>
 
+                                {/* ⚡ CHANGED: custom_primary_indications now from healthProduct */}
                                 <div className="space-y-2">
                                     <Label className="text-sm font-medium">{t('Custom Primary Indications')}</Label>
                                     <Textarea
@@ -1264,6 +1299,7 @@ export default function ProductEdit() {
                                     />
                                 </div>
 
+                                {/* ⚡ CHANGED: custom_dosing_notes now from healthProduct */}
                                 <div className="space-y-2">
                                     <Label htmlFor="custom_dosing_notes" className="text-sm font-medium">{t('Custom Dosing Notes')}</Label>
                                     <Textarea
