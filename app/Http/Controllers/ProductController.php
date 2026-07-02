@@ -965,7 +965,7 @@ class ProductController extends Controller
      * NOTE: tags table uses company_id (not created_by).
      *       product_tags pivot still uses created_by.
      */
-    public function importFromExcel(Request $request)
+ public function importFromExcel(Request $request)
     {
         if (!auth()->user()->isSuperAdmin()) {
             return response()->json([
@@ -1008,6 +1008,24 @@ class ProductController extends Controller
                 'total_rows' => count($rows),
             ]);
 
+            // ═══════════════════════════════════════════════════════════════
+            // NEW: كشف وضع Frequency-Only
+            // لو الملف يحتوي فقط على sku + frequency → وضع التحديث السريع
+            // ═══════════════════════════════════════════════════════════════
+            $headerKeys = array_keys($headerMap);
+            $hasSku      = in_array('sku', $headerKeys, true);
+            $hasFreq     = in_array('frequency', $headerKeys, true)
+                        || in_array('dosing_frequency', $headerKeys, true)
+                        || in_array('freq', $headerKeys, true);
+
+            // لو الملف يحتوي على sku + frequency فقط (أي 2 أعمدة بالظبط)
+            if ($hasSku && $hasFreq && count($headerKeys) === 2) {
+                return $this->importFrequencyOnly($rows, $headerMap);
+            }
+
+            // ═══════════════════════════════════════════════════════════════
+            // EXISTING: Normal Import Mode (Add + Update + Skip)
+            // ═══════════════════════════════════════════════════════════════
             $superAdminCompanyId = getSuperAdminCompanyId();
             $importedCount       = 0;
             $updatedCount        = 0;
@@ -1029,7 +1047,6 @@ class ProductController extends Controller
                     $skuRaw = $item['sku'] ?? null;
                     $sku = $this->cleanImportValue($skuRaw);
 
-                    // Fix: PhpSpreadsheet may read numeric SKUs as float
                     if ($sku !== null && is_numeric($sku)) {
                         $sku = (string) intval(floatval($sku));
                     }
@@ -1108,9 +1125,7 @@ class ProductController extends Controller
                         $status = 'active';
                     }
 
-                    // ═══════════════════════════════════════════════════════════
-                    // ⚡ NEW: frequency field (dosing frequency)
-                    // ═══════════════════════════════════════════════════════════
+                    // ---- frequency field ----
                     $frequency = $this->cleanImportValue($item['frequency'] ?? null);
                     if ($frequency && in_array(strtolower($frequency), ['n/a', 'none'])) {
                         $frequency = null;
@@ -1254,7 +1269,7 @@ class ProductController extends Controller
                         );
                     }
 
-                    // ---- Tags (parse + find-or-create) ----
+                    // ---- Tags ----
                     $tagsRaw = $this->cleanImportValue($item['tags'] ?? null);
                     $desiredTagIds = [];
                     if ($tagsRaw && strtolower($tagsRaw) !== 'none') {
@@ -1276,7 +1291,6 @@ class ProductController extends Controller
                     // UPDATE OR CREATE PRODUCT
                     // ====================================================
                     if ($isUpdate) {
-                        // ============ UPDATE EXISTING PRODUCT ============
                         $product = Product::find($existingHealthProduct->product_id);
 
                         if (!$product) {
@@ -1285,9 +1299,7 @@ class ProductController extends Controller
                             continue;
                         }
 
-                        // ═══════════════════════════════════════════════════════════
-                        // BUILD DESIRED STATE (القيم المرادة من الإكسل)
-                        // ═══════════════════════════════════════════════════════════
+                        // BUILD DESIRED STATE
                         $newProductName    = $productName;
                         $newDescription    = $description;
                         $newPrice          = $price;
@@ -1295,9 +1307,8 @@ class ProductController extends Controller
                         $newStatus         = $status;
                         $newCategoryId     = $categoryId ?? $product->category_id;
                         $newBrandId        = $brandId ?: $product->brand_id;
-                        $newFrequency      = $frequency;  // ⚡ NEW
+                        $newFrequency      = $frequency;
 
-                        // Build desired health product state
                         $newHealthData = [
                             'product_image_url'   => $imageUrl,
                             'bottle_size'         => $bottleSize,
@@ -1316,7 +1327,6 @@ class ProductController extends Controller
                             $newHealthData[$field] = $val;
                         }
 
-                        // Build desired override state
                         $newOverrideData = [];
                         if ($practitionerNotes) {
                             $newOverrideData['practitioner_notes'] = $practitionerNotes;
@@ -1328,16 +1338,11 @@ class ProductController extends Controller
                             $newOverrideData['custom_dosing_notes'] = $customDosingNotes;
                         }
 
-                        // Load existing override (if any)
                         $existingOverride = ProductCompanyOverride::where('product_id', $product->id)
                             ->where('company_id', $superAdminCompanyId)
                             ->first();
 
-                        // ═══════════════════════════════════════════════════════════
-                        // DETECT CHANGES — قارن الحالي بالمراد
-                        // ═══════════════════════════════════════════════════════════
-
-                        // 1) Product fields
+                        // DETECT CHANGES
                         $productChanges = [];
                         if ($this->isFieldDifferent($product->name, $newProductName))       $productChanges['name']         = $newProductName;
                         if ($this->isFieldDifferent($product->description, $newDescription)) $productChanges['description']  = $newDescription;
@@ -1346,9 +1351,8 @@ class ProductController extends Controller
                         if ($this->isFieldDifferent($product->status, $newStatus))           $productChanges['status']       = $newStatus;
                         if ($this->isFieldDifferent($product->category_id, $newCategoryId))  $productChanges['category_id']  = $newCategoryId;
                         if ($this->isFieldDifferent($product->brand_id, $newBrandId))        $productChanges['brand_id']     = $newBrandId;
-                        if ($this->isFieldDifferent($product->frequency, $newFrequency))     $productChanges['frequency']    = $newFrequency;  // ⚡ NEW
+                        if ($this->isFieldDifferent($product->frequency, $newFrequency))     $productChanges['frequency']    = $newFrequency;
 
-                        // 2) Health product fields
                         $healthChanges = [];
                         foreach ($newHealthData as $field => $val) {
                             $currentVal = $existingHealthProduct->{$field} ?? null;
@@ -1357,7 +1361,6 @@ class ProductController extends Controller
                             }
                         }
 
-                        // 3) Override fields
                         $overrideChanges = [];
                         foreach ($newOverrideData as $field => $val) {
                             $currentVal = $existingOverride?->{$field} ?? null;
@@ -1366,7 +1369,6 @@ class ProductController extends Controller
                             }
                         }
 
-                        // 4) Tags comparison
                         $currentTagIds = DB::table('product_tags')
                             ->where('product_id', $product->id)
                             ->where('created_by', $superAdminCompanyId)
@@ -1378,9 +1380,7 @@ class ProductController extends Controller
                         sort($desiredTagIdsSorted);
                         $tagsChanged = ($currentTagIdsSorted !== $desiredTagIdsSorted);
 
-                        // ═══════════════════════════════════════════════════════════
                         // SKIP لو مفيش أي تغيير
-                        // ═══════════════════════════════════════════════════════════
                         if (empty($productChanges) && empty($healthChanges) && empty($overrideChanges) && !$tagsChanged) {
                             $skippedCount++;
                             Log::info("Excel Import: Skipped (no changes)", [
@@ -1391,9 +1391,7 @@ class ProductController extends Controller
                             continue;
                         }
 
-                        // ═══════════════════════════════════════════════════════════
-                        // APPLY CHANGES — فقط الحقول المتغيرة
-                        // ═══════════════════════════════════════════════════════════
+                        // APPLY CHANGES
                         if (!empty($productChanges)) {
                             if (isset($productChanges['name'])) {
                                 $product->name = $productChanges['name'];
@@ -1422,7 +1420,6 @@ class ProductController extends Controller
                             $this->saveTagsToPivot($product->id, $desiredTagIds, $superAdminCompanyId);
                         }
 
-                        // Dispatch event after update
                         \App\Observers\ProductObserver::dispatchProductEvent(
                             $product->id,
                             'updated',
@@ -1444,7 +1441,7 @@ class ProductController extends Controller
                             'tags_changed'   => $tagsChanged,
                         ]);
                     } else {
-                        // ============ CREATE NEW PRODUCT ============
+                        // CREATE NEW PRODUCT
                         $productSlug = Str::slug($productName);
                         $origSlug    = $productSlug;
                         $pCounter    = 1;
@@ -1465,10 +1462,9 @@ class ProductController extends Controller
                         $product->status       = $status;
                         $product->created_by   = $superAdminCompanyId;
                         $product->tax_status   = 'taxable';
-                        $product->frequency    = $frequency;  // ⚡ NEW
+                        $product->frequency    = $frequency;
                         $product->saveQuietly();
 
-                        // Create Health Product
                         $healthData = [
                             'product_id'          => $product->id,
                             'created_by'          => $superAdminCompanyId,
@@ -1493,7 +1489,6 @@ class ProductController extends Controller
 
                         HealthProduct::create($healthData);
 
-                        // Create Company Override (only if there are override fields)
                         if (!empty($newOverrideData)) {
                             ProductCompanyOverride::create([
                                 'product_id' => $product->id,
@@ -1502,12 +1497,10 @@ class ProductController extends Controller
                             ] + $newOverrideData);
                         }
 
-                        // Tags
                         if (!empty($desiredTagIds)) {
                             $this->saveTagsToPivot($product->id, $desiredTagIds, $superAdminCompanyId);
                         }
 
-                        // Dispatch event after create
                         \App\Observers\ProductObserver::dispatchProductEvent(
                             $product->id,
                             'created',
@@ -1573,6 +1566,182 @@ class ProductController extends Controller
             return response()->json(['flag' => 'error', 'msg' => $e->getMessage()]);
         }
     }
+
+    /**
+     * ════════════════════════════════════════════════════════════════════
+     * NEW: وضع التحديث السريع لتكرار الـ frequency
+     * ════════════════════════════════════════════════════════════════════
+     *
+     * يُستخدم لما الملف يحتوي فقط على عمودي `sku` و `frequency`.
+     *
+     * المنطق:
+     *   - لكل صف: ابحث عن المنتج بـ SKU (في جدول products أولاً، ثم health_products)
+     *   - لو لقي المنتج:
+     *       - قارن الـ frequency الحالي بالجديد
+     *       - لو مختلف → UPDATE + updatedCount++
+     *       - لو نفس القيمة → SKIP + skippedCount++
+     *   - لو ما لقي المنتج → SKIP + skippedCount++
+     *
+     * يتجاهل تماماً أي أعمدة أخرى (لو موجودة بالخطأ).
+     *
+     * @param array $rows
+     * @param array $headerMap  lowercase keys → column letters
+     * @return \Illuminate\Http\JsonResponse
+     */
+    private function importFrequencyOnly(array $rows, array $headerMap)
+    {
+        Log::info("Excel Import [Frequency-Only Mode]: Started", [
+            'total_rows' => count($rows),
+        ]);
+
+        $superAdminCompanyId = getSuperAdminCompanyId();
+        $updatedCount        = 0;
+        $skippedCount        = 0;
+        $errorCount          = 0;
+        $errorMessages       = [];
+
+        // تحديد عمود الـ frequency (يدعم aliases)
+        $frequencyCol = $headerMap['frequency']
+                      ?? $headerMap['dosing_frequency']
+                      ?? $headerMap['freq']
+                      ?? null;
+        $skuCol = $headerMap['sku'] ?? null;
+
+        if (!$skuCol || !$frequencyCol) {
+            return response()->json([
+                'flag' => 'error',
+                'msg'  => __('Frequency-only mode requires both "sku" and "frequency" columns.'),
+            ]);
+        }
+
+        foreach ($rows as $rowIndex => $row) {
+            $displayRow = $rowIndex + 2;
+
+            try {
+                // ---- SKU ----
+                $skuRaw = $row[$skuCol] ?? null;
+                $sku = $this->cleanImportValue($skuRaw);
+
+                // Fix numeric SKUs
+                if ($sku !== null && is_numeric($sku)) {
+                    $sku = (string) intval(floatval($sku));
+                }
+
+                if (empty($sku)) {
+                    $skippedCount++;
+                    $errorMessages[] = "Row {$displayRow}: Missing SKU — skipped.";
+                    continue;
+                }
+
+                // ---- Frequency ----
+                $frequencyRaw = $this->cleanImportValue($row[$frequencyCol] ?? null);
+                if ($frequencyRaw && in_array(strtolower($frequencyRaw), ['n/a', 'none', 'null'])) {
+                    $frequencyRaw = null;
+                }
+                // تطبيع: trim فقط (نُحتفظ بالنص كما هو)
+                $newFrequency = $frequencyRaw;
+
+                // ---- البحث عن المنتج ----
+                // 1) ابحث في جدول products مباشرة (الأسرع)
+                $product = Product::where('sku', $sku)->first();
+
+                // 2) fallback: ابحث في health_products ثم خذ المنتج المرتبط
+                if (!$product) {
+                    $healthProduct = HealthProduct::where('sku', $sku)->first();
+                    if ($healthProduct) {
+                        $product = Product::find($healthProduct->product_id);
+                    }
+                }
+
+                // لو ما لقينا المنتج → SKIP
+                if (!$product) {
+                    $skippedCount++;
+                    $errorMessages[] = "Row {$displayRow}: SKU {$sku} not found — skipped.";
+                    Log::info("Excel Import [Frequency-Only]: SKU not found", [
+                        'row' => $displayRow,
+                        'sku' => $sku,
+                    ]);
+                    continue;
+                }
+
+                // ---- مقارنة الـ frequency ----
+                $currentFrequency = $product->frequency;
+
+                if (!$this->isFieldDifferent($currentFrequency, $newFrequency)) {
+                    // نفس القيمة → SKIP
+                    $skippedCount++;
+                    Log::info("Excel Import [Frequency-Only]: Skipped (same frequency)", [
+                        'row'         => $displayRow,
+                        'sku'         => $sku,
+                        'product_id'  => $product->id,
+                        'frequency'   => $currentFrequency,
+                    ]);
+                    continue;
+                }
+
+                // ---- تحديث الـ frequency فقط ----
+                $product->frequency = $newFrequency;
+                $product->saveQuietly();
+
+                // Dispatch event
+                \App\Observers\ProductObserver::dispatchProductEvent(
+                    $product->id,
+                    'updated',
+                    [
+                        'company_slug'  => $this->getCurrentCompanySlug($superAdminCompanyId),
+                        'override_mode' => false,
+                    ]
+                );
+
+                $updatedCount++;
+
+                Log::info("Excel Import [Frequency-Only]: Updated frequency", [
+                    'row'             => $displayRow,
+                    'sku'             => $sku,
+                    'product_id'      => $product->id,
+                    'old_frequency'   => $currentFrequency,
+                    'new_frequency'   => $newFrequency,
+                ]);
+
+            } catch (\Exception $e) {
+                $errorCount++;
+                $skuLabel = $sku ?? 'unknown';
+                $errorMessages[] = "Row {$displayRow} (SKU: {$skuLabel}): " . $e->getMessage();
+                Log::error("Excel Import [Frequency-Only]: Row failed", [
+                    'row'   => $displayRow,
+                    'sku'   => $skuLabel,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Build the result message — نفس صيغة الـ response العادي
+        $msg = __('Frequency update — Updated: :updated, Skipped: :skipped', [
+            'updated' => $updatedCount,
+            'skipped' => $skippedCount,
+        ]);
+        if ($errorCount > 0) {
+            $msg .= ' ' . __('Errors: :errors', ['errors' => $errorCount]);
+        }
+
+        Log::info("Excel Import [Frequency-Only]: Completed", [
+            'updated' => $updatedCount,
+            'skipped' => $skippedCount,
+            'errors'  => $errorCount,
+        ]);
+
+        return response()->json([
+            'flag'          => ($updatedCount > 0) ? 'success' : (($errorCount > 0) ? 'error' : 'warning'),
+            'msg'           => $msg,
+            'imported'      => 0,                  // ما فيش إضافة في هذا الوضع
+            'updated'       => $updatedCount,
+            'skipped'       => $skippedCount,
+            'errors'        => $errorCount,
+            'error_details' => $errorMessages,
+            'mode'          => 'frequency_only',   // مؤشر للـ frontend
+        ]);
+    }
+
 
     /**
      * Clean a value from the Excel import.
