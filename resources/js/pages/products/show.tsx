@@ -222,7 +222,7 @@ export default function ProductShow() {
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">{t('Brand')}</p>
+                      <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">{t('Supplier')}</p>
                       <h3 className="mt-2 text-lg font-bold text-orange-600 leading-tight">{product.brand?.name || t('-')}</h3>
                     </div>
                     <div className="rounded-full bg-orange-100 p-4">

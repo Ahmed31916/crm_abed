@@ -563,7 +563,7 @@ export default function ProductCreate() {
 
                                     <div className="space-y-2">
                                         <Label className="text-sm font-medium">
-                                            {t('Supplier / Brand')}
+                                            {t('Supplier')}
                                         </Label>
                                         <Select value={data.brand_id} onValueChange={(value) => handleInputChange('brand_id', value)}>
                                             <SelectTrigger className={errors.brand_id ? 'border-red-500' : ''}>
@@ -751,7 +751,7 @@ export default function ProductCreate() {
                                         id="full_name"
                                         value={data.full_name}
                                         onChange={(e) => handleInputChange('full_name', e.target.value)}
-                                        placeholder={t('Full product name with brand/line details')}
+                                        placeholder={t('Full product name with supplier/line details')}
                                     />
                                     <p className="text-xs text-muted-foreground">{t('If different from the short name above')}</p>
                                 </div>

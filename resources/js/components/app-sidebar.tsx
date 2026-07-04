@@ -83,7 +83,7 @@ export function AppSidebar() {
         icon: Folder,
     },
     {
-        title: t('Brands'),
+        title: t('Supplier'),
         href: route('brands.index'),
         icon: ShoppingBag,
     },
@@ -268,7 +268,7 @@ export function AppSidebar() {
         }
         if (hasPermission(permissions, 'manage-brands')) {
             productSetupChildren.push({
-                title: t('Brands'),
+                title: t('Suppliers'),
                 href: route('brands.index')
             });
         }

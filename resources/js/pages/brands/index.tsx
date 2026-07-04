@@ -91,7 +91,7 @@ export default function Brands() {
 
     const handleFormSubmit = (formData: any) => {
         if (formMode === 'create') {
-            toast.loading(t('Creating brand...'));
+            toast.loading(t('Creating supplier...'));
 
             router.post(route('brands.store'), formData, {
                 onSuccess: (page) => {
@@ -108,12 +108,12 @@ export default function Brands() {
                     if (typeof errors === 'string') {
                         toast.error(errors);
                     } else {
-                        toast.error(t('Failed to create brand: {{errors}}', { errors: Object.values(errors).join(', ') }));
+                        toast.error(t('Failed to create supplier: {{errors}}', { errors: Object.values(errors).join(', ') }));
                     }
                 }
             });
         } else if (formMode === 'edit') {
-            toast.loading(t('Updating brand...'));
+            toast.loading(t('Updating supplier...'));
 
             router.put(route('brands.update', currentItem.id), formData, {
                 onSuccess: (page) => {
@@ -130,7 +130,7 @@ export default function Brands() {
                     if (typeof errors === 'string') {
                         toast.error(errors);
                     } else {
-                        toast.error(t('Failed to update brand: {{errors}}', { errors: Object.values(errors).join(', ') }));
+                        toast.error(t('Failed to update supplier: {{errors}}', { errors: Object.values(errors).join(', ') }));
                     }
                 }
             });
@@ -138,7 +138,7 @@ export default function Brands() {
     };
 
     const handleDeleteConfirm = () => {
-        toast.loading(t('Deleting brand...'));
+        toast.loading(t('Deleting supplier...'));
 
         router.delete(route('brands.destroy', currentItem.id), {
             onSuccess: (page) => {
@@ -155,7 +155,7 @@ export default function Brands() {
                 if (typeof errors === 'string') {
                     toast.error(errors);
                 } else {
-                    toast.error(t('Failed to delete brand: {{errors}}', { errors: Object.values(errors).join(', ') }));
+                    toast.error(t('Failed to delete supplier: {{errors}}', { errors: Object.values(errors).join(', ') }));
                 }
             }
         });
@@ -163,7 +163,7 @@ export default function Brands() {
 
     const handleToggleStatus = (brand: any) => {
         const newStatus = brand.status === 'active' ? 'inactive' : 'active';
-        toast.loading(`${newStatus === 'active' ? t('Activating') : t('Deactivating')} brand...`);
+        toast.loading(`${newStatus === 'active' ? t('Activating') : t('Deactivating')} supplier...`);
 
         router.put(route('brands.toggle-status', brand.id), {}, {
             onSuccess: (page) => {
@@ -179,7 +179,7 @@ export default function Brands() {
                 if (typeof errors === 'string') {
                     toast.error(errors);
                 } else {
-                    toast.error(t('Failed to update brand status: {{errors}}', { errors: Object.values(errors).join(', ') }));
+                    toast.error(t('Failed to update supplier status: {{errors}}', { errors: Object.values(errors).join(', ') }));
                 }
             }
         });
@@ -202,7 +202,7 @@ export default function Brands() {
     // Add the "New Brand" button if user has permission
     if (hasPermission(permissions, 'create-brands')) {
         pageActions.push({
-            label: t('Add Brand'),
+            label: t('Add supplier'),
             icon: <Plus className="h-4 w-4 mr-2" />,
             variant: 'default',
             onClick: () => handleAddNew()
@@ -212,7 +212,7 @@ export default function Brands() {
     const breadcrumbs = [
         { title: t('Dashboard'), href: route('dashboard') },
         { title: t('Product Setup'), href: route('brands.index') },
-        { title: t('Brands') }
+        { title: t('Suppliers') }
     ];
 
     // Define table columns
@@ -292,7 +292,7 @@ export default function Brands() {
 
     return (
         <PageTemplate
-            title={t("Brands")}
+            title={t("Suppliers")}
             url="/brands"
             actions={pageActions}
             breadcrumbs={breadcrumbs}
@@ -358,7 +358,7 @@ export default function Brands() {
                     to={brands?.to || 0}
                     total={brands?.total || 0}
                     links={brands?.links}
-                    entityName={t("brands")}
+                    entityName={t("suppliers")}
                     onPageChange={(url) => router.get(url)}
                 />
             </div>
@@ -370,7 +370,7 @@ export default function Brands() {
                 onSubmit={handleFormSubmit}
                 formConfig={{
                     fields: [
-                        { name: 'name', label: t('Brand Name'), type: 'text', required: true },
+                        { name: 'name', label: t('Supplier Name'), type: 'text', required: true },
                         { name: 'website', label: t('Website'), type: 'text' },
                         { name: 'description', label: t('Description'), type: 'textarea' },
                         {
@@ -389,10 +389,10 @@ export default function Brands() {
                 initialData={currentItem}
                 title={
                     formMode === 'create'
-                        ? t('Add Brand')
+                        ? t('Add Supplier')
                         : formMode === 'edit'
-                            ? t('Edit Brand')
-                            : t('View Brand')
+                            ? t('Edit Supplier')
+                            : t('View Supplier')
                 }
                 mode={formMode}
             />
@@ -403,7 +403,7 @@ export default function Brands() {
                 onClose={() => setIsDeleteModalOpen(false)}
                 onConfirm={handleDeleteConfirm}
                 itemName={currentItem?.name || ''}
-                entityName={t('brand')}
+                entityName={t('supplier')}
             />
         </PageTemplate>
     );

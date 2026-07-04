@@ -485,29 +485,6 @@ export default function ProductEdit() {
             return;
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // ⚡ CRITICAL FIX: فلترة tag_id قبل الإرسال
-        //   - تأكد إن كل ID هو رقم صحيح
-        //   - تأكد إن الـ ID موجود في قائمة الـ options المتاحة
-        //   - هذا يمنع إرسال IDs غير صالحة للـ backend
-        // ═══════════════════════════════════════════════════════════
-        const validTagIdSet = new Set(tagOptions.map(opt => opt.value));
-        const sanitizedTagIds = (data.tag_id as string[]).filter(id =>
-            id && !isNaN(Number(id)) && validTagIdSet.has(id.toString())
-        );
-
-        // لو فيه فرق، سجل في console للتشخيص
-        if (sanitizedTagIds.length !== data.tag_id.length) {
-            console.warn('Filtered out invalid tag IDs before submit:', {
-                original: data.tag_id,
-                sanitized: sanitizedTagIds,
-                removed: data.tag_id.filter(id => !validTagIdSet.has(id.toString())),
-            });
-        }
-
-        // حدّث data.tag_id بالقيم المصفاة
-        setData('tag_id', sanitizedTagIds);
-
         toast.loading(t('Updating product...'));
 
         put(route('products.update', product.id), {
@@ -725,10 +702,10 @@ export default function ProductEdit() {
                                     </div>
 
                                     {isLocked ? (
-                                        <LockedField label={t('Supplier / Brand')} value={brands?.find((b: any) => b.id.toString() === data.brand_id)?.name || ''} />
+                                        <LockedField label={t('Supplier')} value={brands?.find((b: any) => b.id.toString() === data.brand_id)?.name || ''} />
                                     ) : (
                                         <div className="space-y-2">
-                                            <Label className="text-sm font-medium">{t('Supplier / Brand')}</Label>
+                                            <Label className="text-sm font-medium">{t('Supplier')}</Label>
                                             <Select value={data.brand_id} onValueChange={(value) => handleInputChange('brand_id', value)}>
                                                 <SelectTrigger>
                                                     <SelectValue placeholder={t('Select Supplier')} />
@@ -952,7 +929,7 @@ export default function ProductEdit() {
                                             id="full_name"
                                             value={data.full_name}
                                             onChange={(e) => handleInputChange('full_name', e.target.value)}
-                                            placeholder={t('Full product name with brand/line details')}
+                                            placeholder={t('Full product name with supplier/line details')}
                                         />
                                         <p className="text-xs text-muted-foreground">{t('If different from the short name above')}</p>
                                     </div>

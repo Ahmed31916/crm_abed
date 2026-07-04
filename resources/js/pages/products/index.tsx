@@ -412,7 +412,7 @@ export default function Products() {
         },
         {
             key: 'brand',
-            label: t('Brand'),
+            label: t('Supplier'),
             render: (value: any) => value?.name || t('-')
         },
         {
@@ -478,7 +478,7 @@ export default function Products() {
     ];
 
     const brandOptions = [
-        { value: 'all', label: t('All Brands') },
+        { value: 'all', label: t('All Supplier') },
         ...(brands || []).map((brand: any) => ({
             value: brand.id.toString(),
             label: brand.name
@@ -559,7 +559,7 @@ export default function Products() {
                         },
                         {
                             name: 'brand',
-                            label: t('Brand'),
+                            label: t('Supplier'),
                             type: 'select',
                             value: selectedBrand,
                             onChange: setSelectedBrand,
@@ -850,7 +850,7 @@ export default function Products() {
                         },
                         {
                             name: 'brand_id',
-                            label: t('Brand'),
+                            label: t('Supplier'),
                             type: 'select',
                             options: brands ? brands.map((brand: any) => ({
                                 value: brand.id.toString(),
