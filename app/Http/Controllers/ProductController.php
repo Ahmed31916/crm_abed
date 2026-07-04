@@ -261,7 +261,7 @@ class ProductController extends Controller
             $product->specification = $validated['specification'] ?? null;
             $product->detail = $validated['detail'] ?? null;
             $product->price = $validated['price'];
-            $product->sale_price = $validated['sale_price'] ?? 0;
+            $product->sale_price = !empty($validated['sale_price'])? $validated['sale_price']: $validated['price'];
             $product->stock_quantity = $validated['stock_quantity'] ?? 0;
             $product->stock_status = $validated['stock_status'] ?? 'in_stock';
             $product->product_weight = $validated['product_weight'] ?? null;
@@ -530,7 +530,7 @@ class ProductController extends Controller
             $product->specification = $validated['specification'] ?? null;
             $product->detail = $validated['detail'] ?? null;
             $product->price = $validated['price'];
-            $product->sale_price = $validated['sale_price'] ?? 0;
+            $product->sale_price = !empty($validated['sale_price'])? $validated['sale_price']: $validated['price'];
             $product->stock_quantity = $validated['stock_quantity'] ?? 0;
             $product->stock_status = $validated['stock_status'] ?? 'in_stock';
             $product->product_weight = $validated['product_weight'] ?? null;
