@@ -18,7 +18,6 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 
 /* ============================================================
  * MultiSelect — self-contained multi-select dropdown
- * Reusable for Tags, Primary Indications, Pairs Well With.
  * ============================================================ */
 type MultiSelectOption = {
     value: string;
@@ -281,8 +280,6 @@ export default function ProductEdit() {
     // If a COMPANY user is editing a super admin product, many fields are read-only.
     const isLocked = isSuperAdminProduct && isCompany;
 
-    // ⚡ Pre-compute primary indication map (BEFORE useForm) — needed to convert
-    //    override's names → IDs during form initialization.
     const primaryIndicationNameToId = (() => {
         const m = new Map<string, string>();
         (primaryIndications ?? []).forEach((ind: { id: number; name: string }) => {
@@ -297,15 +294,10 @@ export default function ProductEdit() {
         : [];
 
     // Returns the override value if it exists AND is non-empty.
-    // Empty strings, null, undefined, and arrays/objects with no entries
-    // all fall back to the original value. This prevents the UI from showing
-    // "no selection" when a company-edit form saved an empty override field
-    // for category_id or similar.
     const getEffectiveValue = (field: string, originalValue: any) => {
         if (override) {
             const overrideValue = override[field];
             if (overrideValue !== null && overrideValue !== undefined && overrideValue !== '') {
-                // For arrays, also make sure it's non-empty
                 if (Array.isArray(overrideValue) && overrideValue.length === 0) {
                     return originalValue;
                 }
@@ -340,11 +332,20 @@ export default function ProductEdit() {
         // ===== Product Form & Size =====
         product_form: healthProduct?.product_form || '',
         bottle_size: healthProduct?.bottle_size?.toString() || '',
-        bottle_size_unit: healthProduct?.bottle_size_unit || '',
         product_image_url: healthProduct?.product_image_url || '',
 
         // ===== Full Name =====
         full_name: healthProduct?.full_name || '',
+
+        // ═══════════════════════════════════════════════════════════════
+        // ⚡ NEW: Frequency — قابل للتعديل حتى لو المنتج للسوبر ادمن
+        // - لو الشركة بتعدّل منتج سوبر ادمن: نقرأ من override.frequency_override
+        //   (fallback إلى product.frequency)
+        // - التعديل بيتحفظ في product_company_overrides كـ frequency_override
+        // ═══════════════════════════════════════════════════════════════
+        frequency: isLocked
+            ? (getEffectiveValue('frequency_override', product.frequency ?? '') ?? product.frequency ?? '')
+            : (product.frequency ?? ''),
 
         // ===== Health Product Fields =====
         supports: healthProduct?.supports || '',
@@ -385,10 +386,7 @@ export default function ProductEdit() {
             return [] as string[];
         })(),
 
-        // ═══════════════════════════════════════════════════════════════
-        // ⚡ CHANGED: Practitioner Notes + Custom fields now from healthProduct
-        // (نُقلت من product_company_overrides إلى health_products)
-        // ═══════════════════════════════════════════════════════════════
+        // ===== Practitioner / Custom fields (now from healthProduct) =====
         practitioner_notes: healthProduct?.practitioner_notes || '',
         custom_primary_indications: healthProduct?.custom_primary_indications || [],
         custom_dosing_notes: healthProduct?.custom_dosing_notes || '',
@@ -476,8 +474,10 @@ export default function ProductEdit() {
             clientErrors['price'] = t('Price must be at least 0');
         }
 
-        if (data.sale_price !== '' && data.sale_price && parseFloat(data.sale_price) >= parseFloat(data.price)) {
-            clientErrors['sale_price'] = t('Sale price must be less than the regular price');
+        // ⚡ FIX: فقط نتحقق من sale_price < price لو المستخدم أدخل قيمة فعلية
+        const salePriceProvided = !!(data.sale_price && data.sale_price !== '');
+        if (salePriceProvided && parseFloat(data.sale_price) >= parseFloat(data.price)) {
+            clientErrors['sale_price'] = t('Regular price must be less than the wholesale price');
         }
 
         if (Object.keys(clientErrors).length > 0) {
@@ -488,6 +488,15 @@ export default function ProductEdit() {
         toast.loading(t('Updating product...'));
 
         put(route('products.update', product.id), {
+            preserveScroll: true,
+            preserveState: true,
+            // ⚡ FIX: استخدم transform لضمان sale_price = price لو فاضي
+            transform: (formData) => ({
+                ...formData,
+                sale_price: (!formData.sale_price || formData.sale_price === '')
+                    ? formData.price
+                    : formData.sale_price,
+            }),
             onSuccess: (page: any) => {
                 toast.dismiss();
                 if (page.props.flash?.success) {
@@ -512,7 +521,6 @@ export default function ProductEdit() {
         { key: 'dosing_before_sleep', label: t('Before Sleep'), icon: '😴' },
     ];
 
-    // Locked Field Component
     const LockedField = ({ label, value, hint }: { label: string; value: string; hint?: string }) => (
         <div className="space-y-2">
             <Label className="text-sm font-medium">{label}</Label>
@@ -633,8 +641,8 @@ export default function ProductEdit() {
                                     />
                                 </div>
 
-                                {/* Product Form + Bottle Size + Unit + Brand */}
-                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                {/* Product Form + Bottle Size + Brand */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     {isLocked ? (
                                         <LockedField label={t('Product Form')} value={data.product_form} />
                                     ) : (
@@ -675,37 +683,11 @@ export default function ProductEdit() {
                                         </div>
                                     )}
 
-                                    {/* ⚡ NEW: Bottle Size Unit */}
-                                    <div className="space-y-2">
-                                        <Label htmlFor="bottle_size_unit" className="text-sm font-medium">
-                                            {t('Unit')}
-                                        </Label>
-                                        <Select
-                                            value={data.bottle_size_unit}
-                                            onValueChange={(value) => handleInputChange('bottle_size_unit', value)}
-                                        >
-                                            <SelectTrigger>
-                                                <SelectValue placeholder={t('Select unit')} />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="oz">{t('oz')}</SelectItem>
-                                                <SelectItem value="ml">{t('ml')}</SelectItem>
-                                                <SelectItem value="caps">{t('caps')}</SelectItem>
-                                                <SelectItem value="tablets">{t('tablets')}</SelectItem>
-                                                <SelectItem value="softgels">{t('softgels')}</SelectItem>
-                                                <SelectItem value="gummies">{t('gummies')}</SelectItem>
-                                                <SelectItem value="g">{t('g')}</SelectItem>
-                                                <SelectItem value="bags">{t('bags')}</SelectItem>
-                                                <SelectItem value="count">{t('count')}</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-
                                     {isLocked ? (
-                                        <LockedField label={t('Supplier')} value={brands?.find((b: any) => b.id.toString() === data.brand_id)?.name || ''} />
+                                        <LockedField label={t('Supplier / Brand')} value={brands?.find((b: any) => b.id.toString() === data.brand_id)?.name || ''} />
                                     ) : (
                                         <div className="space-y-2">
-                                            <Label className="text-sm font-medium">{t('Supplier')}</Label>
+                                            <Label className="text-sm font-medium">{t('Supplier / Brand')}</Label>
                                             <Select value={data.brand_id} onValueChange={(value) => handleInputChange('brand_id', value)}>
                                                 <SelectTrigger>
                                                     <SelectValue placeholder={t('Select Supplier')} />
@@ -750,35 +732,37 @@ export default function ProductEdit() {
                                     )}
                                 </div>
 
-                                {/* ============ Pairs Well With — MultiSelect (or LockedField) ============ */}
-                                {isLocked ? (
-                                    <LockedField
-                                        label={t('Pairs Well With')}
-                                        value={availableProducts
-                                            ?.filter((p: any) => data.pairs_well_with.includes(p.id.toString()))
-                                            ?.map((p: any) => p.name)
-                                            ?.join(', ') || t('None')}
-                                    />
-                                ) : (
-                                    <div className="space-y-2">
-                                        <Label className="text-sm font-medium">{t('Pairs Well With')}</Label>
-                                        <MultiSelect
-                                            options={pairsWellWithOptions}
-                                            value={data.pairs_well_with}
-                                            onChange={(val) => handleInputChange('pairs_well_with', val)}
-                                            placeholder={t('Select products...')}
-                                            emptyMessage={t('No other products available')}
-                                            searchPlaceholder={t('Search products...')}
+                                {/* ============ Pairs Well With — Only for Super Admin ============ */}
+                                {!isCompany && (
+                                    isLocked ? (
+                                        <LockedField
+                                            label={t('Pairs Well With')}
+                                            value={availableProducts
+                                                ?.filter((p: any) => data.pairs_well_with.includes(p.id.toString()))
+                                                ?.map((p: any) => p.name)
+                                                ?.join(', ') || t('None')}
                                         />
-                                        {data.pairs_well_with.length > 0 && (
-                                            <p className="text-xs text-muted-foreground">
-                                                {data.pairs_well_with.length} {data.pairs_well_with.length === 1 ? t('product selected') : t('products selected')}
-                                            </p>
-                                        )}
-                                    </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <Label className="text-sm font-medium">{t('Pairs Well With')}</Label>
+                                            <MultiSelect
+                                                options={pairsWellWithOptions}
+                                                value={data.pairs_well_with}
+                                                onChange={(val) => handleInputChange('pairs_well_with', val)}
+                                                placeholder={t('Select products...')}
+                                                emptyMessage={t('No other products available')}
+                                                searchPlaceholder={t('Search products...')}
+                                            />
+                                            {data.pairs_well_with.length > 0 && (
+                                                <p className="text-xs text-muted-foreground">
+                                                    {data.pairs_well_with.length} {data.pairs_well_with.length === 1 ? t('product selected') : t('products selected')}
+                                                </p>
+                                            )}
+                                        </div>
+                                    )
                                 )}
 
-                                {/* Price + Sale Price */}
+                                {/* Price + Regular Price (Retail price) */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {isLocked ? (
                                         <LockedField label={t('Price')} value={data.price} />
@@ -802,7 +786,7 @@ export default function ProductEdit() {
 
                                     <div className="space-y-2">
                                         <Label htmlFor="sale_price" className="text-sm font-medium">
-                                            {t('Sale Price')}
+                                            {t('Regular Price (Retail price)')}
                                         </Label>
                                         <Input
                                             id="sale_price"
@@ -811,8 +795,10 @@ export default function ProductEdit() {
                                             min="0"
                                             value={data.sale_price}
                                             onChange={(e) => handleInputChange('sale_price', e.target.value)}
+                                            placeholder={t('Leave empty to use Price value')}
                                             className={errors.sale_price ? 'border-red-500' : ''}
                                         />
+                                        <p className="text-xs text-muted-foreground">{t('Leave empty to use Price value')}</p>
                                         {errors.sale_price && <p className="text-xs text-red-500">{errors.sale_price}</p>}
                                         {isLocked && (
                                             <p className="text-xs text-blue-600 flex items-center gap-1">
@@ -869,8 +855,8 @@ export default function ProductEdit() {
                                     </div>
                                 )}
 
-                                {/* Status + Tax + Weight */}
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                {/* Status + Tax + Weight + Frequency */}
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                                     {isLocked ? (
                                         <LockedField label={t('Status')} value={data.status === 'active' ? t('Active') : t('Inactive')} />
                                     ) : (
@@ -917,6 +903,24 @@ export default function ProductEdit() {
                                             />
                                         </div>
                                     )}
+                                    {/* ⚡ NEW: Frequency — قابل للتعديل حتى لو isLocked */}
+                                    <div className="space-y-2">
+                                        <Label htmlFor="frequency" className="text-sm font-medium">
+                                            {t('Frequency')}
+                                        </Label>
+                                        <Input
+                                            id="frequency"
+                                            value={data.frequency}
+                                            onChange={(e) => handleInputChange('frequency', e.target.value)}
+                                            placeholder={t('e.g., 2x daily, once daily')}
+                                        />
+                                        {isLocked && (
+                                            <p className="text-xs text-blue-600 flex items-center gap-1">
+                                                <Info className="h-3 w-3" />
+                                                {t('Your frequency override will be saved as company override')}
+                                            </p>
+                                        )}
+                                    </div>
                                 </div>
 
                                 {/* Full Name */}
@@ -1072,7 +1076,6 @@ export default function ProductEdit() {
                                 </CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-4 pt-4">
-                                {/* ============ Primary Indications — MultiSelect ============ */}
                                 <div className="space-y-2">
                                     <Label className="text-sm font-medium">{t('Primary Indications')}</Label>
                                     <MultiSelect
@@ -1252,7 +1255,6 @@ export default function ProductEdit() {
                                 <CardDescription>{t('Stored on the health product record')}</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4 pt-4">
-                                {/* ⚡ CHANGED: practitioner_notes now from healthProduct */}
                                 <div className="space-y-2">
                                     <Label htmlFor="practitioner_notes" className="text-sm font-medium">{t('Practitioner Notes')}</Label>
                                     <Textarea
@@ -1265,7 +1267,6 @@ export default function ProductEdit() {
                                     <p className="text-xs text-muted-foreground">{t('Stored on the health product record')}</p>
                                 </div>
 
-                                {/* ⚡ CHANGED: custom_primary_indications now from healthProduct */}
                                 <div className="space-y-2">
                                     <Label className="text-sm font-medium">{t('Custom Primary Indications')}</Label>
                                     <Textarea
@@ -1276,7 +1277,6 @@ export default function ProductEdit() {
                                     />
                                 </div>
 
-                                {/* ⚡ CHANGED: custom_dosing_notes now from healthProduct */}
                                 <div className="space-y-2">
                                     <Label htmlFor="custom_dosing_notes" className="text-sm font-medium">{t('Custom Dosing Notes')}</Label>
                                     <Textarea

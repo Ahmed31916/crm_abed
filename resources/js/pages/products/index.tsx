@@ -19,10 +19,14 @@ import { SearchAndFilterBar } from '@/components/ui/search-and-filter-bar';
 
 export default function Products() {
     const { t } = useTranslation();
-    const { auth, products, categories, brands, taxes, users, companies, samplePath, filters: pageFilters = {} } = usePage().props as any;
+    const { auth, products, categories, brands, taxes, tags, users, companies, superAdminCompanyId, samplePath, filters: pageFilters = {} } = usePage().props as any;
     const permissions = auth?.permissions || [];
     const isCompany = auth?.user?.type === 'company';
     const isSuperAdmin = auth?.user?.type === 'superadmin';
+
+    // ⚡ Helper: هل المنتج من إنشاء السوبر ادمن؟ (يُستخدم لإخفاء زر Toggle Status للشركات)
+    const isProductSuperAdmin = (product: any) =>
+        Number(product?.created_by) === Number(superAdminCompanyId);
 
     // State
     const [searchTerm, setSearchTerm] = useState(pageFilters.search || '');
@@ -30,6 +34,8 @@ export default function Products() {
     const [selectedBrand, setSelectedBrand] = useState(pageFilters.brand || 'all');
     const [selectedStatus, setSelectedStatus] = useState(pageFilters.status || 'all');
     const [selectedAssignee, setSelectedAssignee] = useState(pageFilters.assigned_to || 'all');
+    // ⚡ NEW: Tags filter — يظهر للسوبر ادمن وللشركة
+    const [selectedTag, setSelectedTag] = useState(pageFilters.tag || 'all');
     const [showFilters, setShowFilters] = useState(false);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -61,6 +67,7 @@ export default function Products() {
             || selectedBrand !== 'all'
             || selectedStatus !== 'all'
             || selectedAssignee !== 'all'
+            || selectedTag !== 'all'
             || (isSuperAdmin && selectedOwnership !== 'all')
             || (isSuperAdmin && selectedCompanyFilter !== 'all');
     };
@@ -71,6 +78,7 @@ export default function Products() {
             + (selectedBrand !== 'all' ? 1 : 0)
             + (selectedStatus !== 'all' ? 1 : 0)
             + (selectedAssignee !== 'all' ? 1 : 0)
+            + (selectedTag !== 'all' ? 1 : 0)
             + (isSuperAdmin && selectedOwnership !== 'all' ? 1 : 0)
             + (isSuperAdmin && selectedOwnership !== 'super_admin' && selectedCompanyFilter !== 'all' ? 1 : 0);
     };
@@ -84,6 +92,8 @@ export default function Products() {
         brand: selectedBrand !== 'all' ? selectedBrand : undefined,
         status: selectedStatus !== 'all' ? selectedStatus : undefined,
         assigned_to: selectedAssignee !== 'all' ? selectedAssignee : undefined,
+        // ⚡ NEW: tag filter
+        tag: selectedTag !== 'all' ? selectedTag : undefined,
         // فلتر الملكية (فقط للسوبر ادمن)
         ownership: isSuperAdmin && selectedOwnership !== 'all' ? selectedOwnership : undefined,
         // فلتر الشركة (فقط للسوبر ادمن + لما لا يكون ownership = super_admin)
@@ -246,6 +256,7 @@ export default function Products() {
         setSelectedBrand('all');
         setSelectedStatus('all');
         setSelectedAssignee('all');
+        setSelectedTag('all');
         setSelectedOwnership('all');
         setSelectedCompanyFilter('all');
         setShowFilters(false);
@@ -412,7 +423,7 @@ export default function Products() {
         },
         {
             key: 'brand',
-            label: t('Supplier'),
+            label: t('Brand'),
             render: (value: any) => value?.name || t('-')
         },
         {
@@ -437,13 +448,17 @@ export default function Products() {
     ];
 
     // Define table actions
+    // ⚡ FIX: Toggle Status مختفي لمنتجات السوبر ادمن عند صاحب الشركة
+    //        - shouldShow: دالة تحدد إظهار الأكشن حسب المنتج الحالي
+    //          (لو CrudTable لا يدعمها، يُنصح بإضافة دعم لها في المكوّن)
     const actions = [
         {
             label: t('Toggle Status'),
             icon: 'Lock',
             action: 'toggle-status',
             className: 'text-amber-500',
-            requiredPermission: 'toggle-status-products'
+            requiredPermission: 'toggle-status-products',
+            shouldShow: (item: any) => !(isCompany && isProductSuperAdmin(item)),
         },
         {
             label: t('View'),
@@ -478,7 +493,7 @@ export default function Products() {
     ];
 
     const brandOptions = [
-        { value: 'all', label: t('All Supplier') },
+        { value: 'all', label: t('All Brands') },
         ...(brands || []).map((brand: any) => ({
             value: brand.id.toString(),
             label: brand.name
@@ -559,11 +574,26 @@ export default function Products() {
                         },
                         {
                             name: 'brand',
-                            label: t('Supplier'),
+                            label: t('Brand'),
                             type: 'select',
                             value: selectedBrand,
                             onChange: setSelectedBrand,
                             options: brandOptions
+                        },
+                        // ⚡ NEW: Tags filter — يظهر للسوبر ادمن وللشركة
+                        {
+                            name: 'tag',
+                            label: t('Tag'),
+                            type: 'select',
+                            value: selectedTag,
+                            onChange: setSelectedTag,
+                            options: [
+                                { value: 'all', label: t('All Tags') },
+                                ...((tags || []).map((tag: any) => ({
+                                    value: tag.id.toString(),
+                                    label: tag.name
+                                })))
+                            ]
                         },
                         {
                             name: 'status',
@@ -735,7 +765,8 @@ export default function Products() {
                                                         <span>{t("Edit")}</span>
                                                     </DropdownMenuItem>
                                                 )}
-                                                {hasPermission(permissions, 'toggle-status-products') && (
+                                                {/* ⚡ FIX: إخفاء Toggle Status لمنتجات السوبر ادمن عند صاحب الشركة */}
+                                                {hasPermission(permissions, 'toggle-status-products') && !(isCompany && isProductSuperAdmin(product)) && (
                                                     <DropdownMenuItem onClick={() => handleToggleStatus(product)}>
                                                         <Lock className="h-4 w-4 mr-2"/>
                                                         <span>{product.status === 'active' ? t("Deactivate") : t("Activate")}</span>
@@ -850,7 +881,7 @@ export default function Products() {
                         },
                         {
                             name: 'brand_id',
-                            label: t('Supplier'),
+                            label: t('Brand'),
                             type: 'select',
                             options: brands ? brands.map((brand: any) => ({
                                 value: brand.id.toString(),

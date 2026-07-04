@@ -140,7 +140,7 @@ class ProductObserver
         // ==================== Image URL ====================
         $imageUrl = !empty($healthProduct?->product_image_url)
             ? $healthProduct->product_image_url
-            : $product->getFirstMediaUrl('main');
+            : $product->getMainImageUrlAttribute();
 
         // ==================== Build Final Payload ====================
         return [
