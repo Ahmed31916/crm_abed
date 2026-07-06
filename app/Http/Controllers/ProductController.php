@@ -187,7 +187,6 @@ class ProductController extends Controller
             return redirect()->back()->with('error', __('Product limit reached.'));
         }
 
-        // ⚡ FIX: product_sku أصبح nullable — لو فاضي بيتولّد تلقائياً
         $validated = $request->validate([
             'name'              => 'required|string|max:255',
             'description'       => 'nullable|string',
@@ -226,6 +225,7 @@ class ProductController extends Controller
             'dosing_dinner'          => 'nullable|string|max:255',
             'dosing_before_sleep'    => 'nullable|string|max:255',
             'dosing_na'              => 'nullable|boolean',
+            'frequency'          => 'nullable|string|max:255',  // ⚡ NEW
             'tag_id'            => 'required|array|min:1',
             'tag_id.*'          => 'exists:tags,id',
             'pairs_well_with'   => 'nullable|array',
@@ -237,44 +237,21 @@ class ProductController extends Controller
 
         try {
             DB::beginTransaction();
-
             $currentCompanyId = createdBy();
-            $dosingNa = $request->boolean('dosing_na');
 
-            // ═══════════════════════════════════════════════════════════════
-            // ⚡ AUTO-GENERATE SKU لو المستخدم ما أدخله
-            // ═══════════════════════════════════════════════════════════════
+            // ⚡ توليد SKU تلقائياً لو فاضي
             $productSku = $validated['product_sku'] ?? null;
             if (empty($productSku)) {
                 $productSku = $this->generateUniqueSku();
-                Log::info('ProductController@store: Auto-generated SKU', [
-                    'sku' => $productSku,
-                    'company_id' => $currentCompanyId,
-                ]);
             }
+            $validated['product_sku'] = $productSku;
+
+            // ⚡ استخدام buildProductData المشترك
+            $productData = $this->buildProductData($validated, $currentCompanyId, true);
+            $productData['sku'] = $productSku;
 
             $product = new Product();
-            $product->name = $validated['name'];
-            $product->slug = \Illuminate\Support\Str::slug($validated['name']);
-            $product->sku = $productSku;
-            $product->description = $validated['description'] ?? null;
-            $product->specification = $validated['specification'] ?? null;
-            $product->detail = $validated['detail'] ?? null;
-            $product->price = $validated['price'];
-            $product->sale_price = !empty($validated['sale_price'])? $validated['sale_price']: $validated['price'];
-            $product->stock_quantity = $validated['stock_quantity'] ?? 0;
-            $product->stock_status = $validated['stock_status'] ?? 'in_stock';
-            $product->product_weight = $validated['product_weight'] ?? null;
-            $product->category_id = $validated['category_id'];
-            $product->brand_id = $validated['brand_id'] ?? null;
-            $product->tax_id = $validated['tax_id'] ?? null;
-            $product->status = $validated['status'] ?? 'active';
-            $product->created_by = $currentCompanyId;
-
-            if (!empty($validated['main_image_id'])) {
-                $product->main_image_id = $validated['main_image_id'];
-            }
-
+            $product->fill($productData);
             $product->save();
 
             if (!empty($validated['additional_image_ids'])) {
@@ -287,33 +264,10 @@ class ProductController extends Controller
             $this->saveTagsToPivot($product->id, $validTagIds, $currentCompanyId);
 
             // ===== Health Product =====
-            $bottleSizeUnit = $validated['bottle_size_unit'] ?? (($validated['product_form'] == 'Liquid') ? 'oz' : 'caps');
+            $healthData = $this->buildHealthProductData($validated, $currentCompanyId, $productSku);
             HealthProduct::updateOrCreate(
                 ['product_id' => $product->id, 'created_by' => $currentCompanyId],
-                [
-                    'sku'                     => $productSku,
-                    'product_form'            => $validated['product_form'],
-                    'bottle_size'             => $validated['bottle_size'],
-                    'bottle_size_unit'        => $bottleSizeUnit,
-                    'product_image_url'       => $validated['product_image_url'] ?? null,
-                    'full_name'               => $validated['full_name'] ?? null,
-                    'ingredients'             => $validated['ingredients'] ?? null,
-                    'contraindications'       => $validated['contraindications'] ?? 'N/A',
-                    'research_links'          => $validated['research_links'] ?? null,
-                    'supports'                => $validated['supports'] ?? null,
-                    'useful_for'              => $validated['useful_for'] ?? null,
-                    'dosing_upon_rising'      => $dosingNa ? null : ($validated['dosing_upon_rising'] ?? null),
-                    'dosing_breakfast'        => $dosingNa ? null : ($validated['dosing_breakfast'] ?? null),
-                    'dosing_between_meals_am' => $dosingNa ? null : ($validated['dosing_between_meals_am'] ?? null),
-                    'dosing_lunch'            => $dosingNa ? null : ($validated['dosing_lunch'] ?? null),
-                    'dosing_between_meals_pm' => $dosingNa ? null : ($validated['dosing_between_meals_pm'] ?? null),
-                    'dosing_dinner'           => $dosingNa ? null : ($validated['dosing_dinner'] ?? null),
-                    'dosing_before_sleep'     => $dosingNa ? null : ($validated['dosing_before_sleep'] ?? null),
-                    'dosing_na'               => $dosingNa,
-                    'practitioner_notes'         => $validated['practitioner_notes'] ?? null,
-                    'custom_primary_indications' => $validated['custom_primary_indications'] ?? [],
-                    'custom_dosing_notes'        => $validated['custom_dosing_notes'] ?? null,
-                ]
+                $healthData
             );
 
             // ===== Primary Indications Pivot =====
@@ -324,29 +278,22 @@ class ProductController extends Controller
                 $this->syncPairsWellWith($product->id, $validated['pairs_well_with'], $currentCompanyId);
             }
 
-            // ===== Override (custom fields only) =====
+            // ===== Override =====
             ProductCompanyOverride::updateOrCreate(
                 ['product_id' => $product->id, 'company_id' => $currentCompanyId],
-                [
-                    'is_visible' => true,
-                ]
+                ['is_visible' => true]
             );
 
             $createdProductId = $product->id;
             $companySlug = $this->getCurrentCompanySlug($currentCompanyId);
             DB::afterCommit(function () use ($createdProductId, $companySlug) {
                 \App\Observers\ProductObserver::dispatchProductEvent(
-                    $createdProductId,
-                    'created',
-                    [
-                        'company_slug' => $companySlug,
-                        'override_mode' => false,
-                    ]
+                    $createdProductId, 'created',
+                    ['company_slug' => $companySlug, 'override_mode' => false]
                 );
             });
 
             DB::commit();
-
             return redirect()->route('products.index')->with('success', __('Product created successfully.'));
         } catch (\Exception $e) {
             DB::rollBack();
@@ -464,12 +411,10 @@ class ProductController extends Controller
         $isSuperAdminProduct = isSuperAdminProduct($product)
             && (int) $product->created_by !== (int) $currentCompanyId;
 
-        // Company user editing super admin product → update override only
         if (!auth()->user()->isSuperAdmin() && $isSuperAdminProduct) {
             return $this->updateOverride($request, $product);
         }
 
-        // ===== Full update (own product or super admin editing) =====
         $validated = $request->validate([
             'name'              => 'required|string|max:255',
             'description'       => 'nullable|string',
@@ -487,7 +432,6 @@ class ProductController extends Controller
             'main_image_id'     => 'nullable|exists:media,id',
             'additional_image_ids' => 'nullable|array',
             'additional_image_ids.*' => 'exists:media,id',
-            // ⚡ FIX: تجاهل المنتج الحالي في قاعدة unique (SKU ما بيتعدّلش بعد الإنشاء أصلاً)
             'product_sku'       => 'required|string|max:255|unique:products,sku,' . $productId,
             'product_form'      => 'required|in:Liquid,Caps',
             'bottle_size'       => 'required|numeric|min:0',
@@ -509,6 +453,7 @@ class ProductController extends Controller
             'dosing_dinner'          => 'nullable|string|max:255',
             'dosing_before_sleep'    => 'nullable|string|max:255',
             'dosing_na'              => 'nullable|boolean',
+            'frequency'          => 'nullable|string|max:255',  // ⚡ NEW
             'tag_id'            => 'required|array|min:1',
             'tag_id.*'          => 'exists:tags,id',
             'pairs_well_with'   => 'nullable|array',
@@ -520,78 +465,26 @@ class ProductController extends Controller
 
         try {
             DB::beginTransaction();
-            $dosingNa = $request->boolean('dosing_na');
 
-            // ===== TABLE: products =====
-            $product->name = $validated['name'];
-            $product->slug = \Illuminate\Support\Str::slug($validated['name']);
-            // SKU NOT updated on products table (read-only after creation)
-            $product->description = $validated['description'] ?? null;
-            $product->specification = $validated['specification'] ?? null;
-            $product->detail = $validated['detail'] ?? null;
-            $product->price = $validated['price'];
-            $product->sale_price = !empty($validated['sale_price'])? $validated['sale_price']: $validated['price'];
-            $product->stock_quantity = $validated['stock_quantity'] ?? 0;
-            $product->stock_status = $validated['stock_status'] ?? 'in_stock';
-            $product->product_weight = $validated['product_weight'] ?? null;
-            $product->category_id = $validated['category_id'];
-            $product->brand_id = $validated['brand_id'] ?? null;
-            $product->tax_id = $validated['tax_id'] ?? null;
-            $product->status = $validated['status'] ?? 'active';
+            // ⚡ استخدام buildProductData المشترك (isNew = false)
+            $productData = $this->buildProductData($validated, $currentCompanyId, false);
 
-            if (!empty($validated['main_image_id'])) {
-                $product->main_image_id = $validated['main_image_id'];
-            }
-            if (isset($validated['additional_image_ids'])) {
-                $product->additional_image_ids = $validated['additional_image_ids'];
-            }
+            // SKU لا يُعدّل بعد الإنشاء
+            unset($productData['sku']);
 
+            $product->fill($productData);
             $product->saveQuietly();
 
-            // ⚡ فلترة tag_id قبل الحفظ
+            // ===== Tags =====
             $rawTagIds = $validated['tag_id'] ?? [];
             $validTagIds = $this->filterValidTagIds($rawTagIds, $currentCompanyId);
-
-            if (count($rawTagIds) !== count($validTagIds)) {
-                Log::warning('ProductController@update: Filtered out invalid tag IDs', [
-                    'product_id'      => $product->id,
-                    'company_id'      => $currentCompanyId,
-                    'sent_tag_ids'    => $rawTagIds,
-                    'valid_tag_ids'   => $validTagIds,
-                    'filtered_count'  => count($rawTagIds) - count($validTagIds),
-                ]);
-            }
-
             $this->saveTagsToPivot($product->id, $validTagIds, $currentCompanyId);
 
-            // ===== TABLE: health_products =====
-            $bottleSizeUnit = $validated['bottle_size_unit'] ?? (($validated['product_form'] == 'Liquid') ? 'oz' : 'caps');
+            // ===== Health Product =====
+            $healthData = $this->buildHealthProductData($validated, $currentCompanyId, $validated['product_sku']);
             HealthProduct::updateOrCreate(
                 ['product_id' => $product->id, 'created_by' => $currentCompanyId],
-                [
-                    'sku'                     => $validated['product_sku'],
-                    'product_form'            => $validated['product_form'],
-                    'bottle_size'             => $validated['bottle_size'],
-                    'bottle_size_unit'        => $bottleSizeUnit,
-                    'product_image_url'       => $validated['product_image_url'] ?? null,
-                    'full_name'               => $validated['full_name'] ?? null,
-                    'ingredients'             => $validated['ingredients'] ?? null,
-                    'contraindications'       => $validated['contraindications'] ?? 'N/A',
-                    'research_links'          => $validated['research_links'] ?? null,
-                    'supports'                => $validated['supports'] ?? null,
-                    'useful_for'              => $validated['useful_for'] ?? null,
-                    'dosing_upon_rising'      => $dosingNa ? null : ($validated['dosing_upon_rising'] ?? null),
-                    'dosing_breakfast'        => $dosingNa ? null : ($validated['dosing_breakfast'] ?? null),
-                    'dosing_between_meals_am' => $dosingNa ? null : ($validated['dosing_between_meals_am'] ?? null),
-                    'dosing_lunch'            => $dosingNa ? null : ($validated['dosing_lunch'] ?? null),
-                    'dosing_between_meals_pm' => $dosingNa ? null : ($validated['dosing_between_meals_pm'] ?? null),
-                    'dosing_dinner'           => $dosingNa ? null : ($validated['dosing_dinner'] ?? null),
-                    'dosing_before_sleep'     => $dosingNa ? null : ($validated['dosing_before_sleep'] ?? null),
-                    'dosing_na'               => $dosingNa,
-                    'practitioner_notes'         => $validated['practitioner_notes'] ?? null,
-                    'custom_primary_indications' => $validated['custom_primary_indications'] ?? [],
-                    'custom_dosing_notes'        => $validated['custom_dosing_notes'] ?? null,
-                ]
+                $healthData
             );
 
             // ===== Primary Indications Pivot =====
@@ -604,22 +497,15 @@ class ProductController extends Controller
             // ===== Override =====
             ProductCompanyOverride::updateOrCreate(
                 ['product_id' => $product->id, 'company_id' => $currentCompanyId],
-                [
-                    'is_visible' => true,
-                ]
+                ['is_visible' => true]
             );
 
             $updatedProductId = $product->id;
             $companySlug = $this->getCurrentCompanySlug($currentCompanyId);
-
             DB::afterCommit(function () use ($updatedProductId, $companySlug) {
                 \App\Observers\ProductObserver::dispatchProductEvent(
-                    $updatedProductId,
-                    'updated',
-                    [
-                        'company_slug' => $companySlug,
-                        'override_mode' => false,
-                    ]
+                    $updatedProductId, 'updated',
+                    ['company_slug' => $companySlug, 'override_mode' => false]
                 );
             });
 
@@ -844,6 +730,77 @@ class ProductController extends Controller
             new \App\Exports\ProductExport($companyIdForExport, $superAdminId),
             $fileName
         );
+    }
+
+        private function buildHealthProductData(array $data, int $companyId, string $sku): array
+    {
+        $dosingNa = !empty($data['dosing_na']);
+
+        $productForm = $data['product_form'] ?? 'Caps';
+        $bottleSizeUnit = !empty($data['bottle_size_unit'])
+            ? $data['bottle_size_unit']
+            : (($productForm === 'Liquid') ? 'oz' : 'caps');
+
+        return [
+            'sku'                        => $sku,
+            'product_form'               => $productForm,
+            'bottle_size'                => $data['bottle_size'] ?? 0,
+            'bottle_size_unit'           => $bottleSizeUnit,
+            'product_image_url'          => $data['product_image_url'] ?? null,
+            'full_name'                  => $data['full_name'] ?? null,
+            'ingredients'                => $data['ingredients'] ?? null,
+            'contraindications'          => $data['contraindications'] ?? 'N/A',
+            'research_links'             => $data['research_links'] ?? null,
+            'supports'                   => $data['supports'] ?? null,
+            'useful_for'                 => $data['useful_for'] ?? null,
+            'practitioner_notes'         => $data['practitioner_notes'] ?? null,
+            'custom_primary_indications' => $data['custom_primary_indications'] ?? [],
+            'custom_dosing_notes'        => $data['custom_dosing_notes'] ?? null,
+            'dosing_upon_rising'         => $dosingNa ? null : ($data['dosing_upon_rising'] ?? null),
+            'dosing_breakfast'           => $dosingNa ? null : ($data['dosing_breakfast'] ?? null),
+            'dosing_between_meals_am'    => $dosingNa ? null : ($data['dosing_between_meals_am'] ?? null),
+            'dosing_lunch'               => $dosingNa ? null : ($data['dosing_lunch'] ?? null),
+            'dosing_between_meals_pm'    => $dosingNa ? null : ($data['dosing_between_meals_pm'] ?? null),
+            'dosing_dinner'              => $dosingNa ? null : ($data['dosing_dinner'] ?? null),
+            'dosing_before_sleep'        => $dosingNa ? null : ($data['dosing_before_sleep'] ?? null),
+            'dosing_na'                  => $dosingNa,
+        ];
+    }
+
+        private function buildProductData(array $data, int $companyId, bool $isNew = true): array
+    {
+        $productData = [
+            'name'           => $data['name'],
+            'slug'           => \Illuminate\Support\Str::slug($data['name']),
+            'description'    => $data['description'] ?? null,
+            'specification'  => $data['specification'] ?? null,
+            'detail'         => $data['detail'] ?? null,
+            'price'          => $data['price'],
+            'sale_price'     => !empty($data['sale_price']) ? $data['sale_price'] : ($data['price'] ?? 0),
+            'stock_quantity' => $data['stock_quantity'] ?? 0,
+            'stock_status'   => $data['stock_status'] ?? 'in_stock',
+            'product_weight' => $data['product_weight'] ?? null,
+            'category_id'    => $data['category_id'],
+            'brand_id'       => $data['brand_id'] ?? null,
+            'tax_id'         => $data['tax_id'] ?? null,
+            'status'         => $data['status'] ?? 'active',
+            'frequency'      => $data['frequency'] ?? null,
+            'tax_status'     => 'taxable',
+        ];
+
+        if ($isNew) {
+            $productData['sku'] = $data['sku'] ?? $data['product_sku'] ?? null;
+            $productData['created_by'] = $companyId;
+        }
+
+        if (!empty($data['main_image_id'])) {
+            $productData['main_image_id'] = $data['main_image_id'];
+        }
+        if (isset($data['additional_image_ids'])) {
+            $productData['additional_image_ids'] = $data['additional_image_ids'];
+        }
+
+        return $productData;
     }
 
     public function downloadTemplate()
@@ -1915,18 +1872,19 @@ class ProductController extends Controller
             if ($indication) $indicationIds[] = $indication->id;
         }
 
-        // Tags
+        // Tags — ⚡ استخدام findOrCreateTagByName لمنع التكرار
         $tagsRaw = $this->getHeaderValue($item, ['tags', 'tag']);
         $desiredTagIds = [];
         if ($tagsRaw && strtolower($tagsRaw) !== 'none') {
             $tagNames = array_filter(array_map('trim', preg_split('/[,|]/', $tagsRaw)));
             foreach ($tagNames as $tagName) {
                 if (empty($tagName)) continue;
-                $tag = Tag::firstOrCreate(
-                    ['name' => $tagName, 'company_id' => $companyId],
-                    ['slug' => Str::slug($tagName), 'status' => 'active', 'color' => '#6366f1', 'created_by' => $companyId]
-                );
-                $desiredTagIds[] = $tag->id;
+                // ⚡ FIX: استخدم findOrCreateTagByName بدلاً من Tag::firstOrCreate
+                // هذا يبحث بالاسم عبر كل شركات المستخدم، ويمنع إنشاء تاجات مكررة
+                $tag = $this->findOrCreateTagByName($tagName, $companyId);
+                if ($tag) {
+                    $desiredTagIds[] = $tag->id;
+                }
             }
         }
         $desiredTagIds = array_values(array_unique($desiredTagIds));
@@ -2108,81 +2066,209 @@ class ProductController extends Controller
      * ⚡ BULLETPROOF: Save tags to product_tags pivot table
      * لا تنشئ tags جديدة أبداً
      */
-    private function saveTagsToPivot(int $productId, array $tagIds, int $companyId): void
+private function saveTagsToPivot(int $productId, array $tagIds, int $companyId): void
+
     {
+
         $tagIds = array_values(array_unique(
+
             array_filter($tagIds, fn($id) => !is_null($id) && $id !== '' && is_numeric($id))
+
         ));
 
+
         if (empty($tagIds)) {
+
             DB::table('product_tags')
+
                 ->where('product_id', $productId)
+
                 ->where('created_by', $companyId)
+
                 ->delete();
+
             return;
+
         }
+
 
         $intTagIds = array_map('intval', $tagIds);
 
+
         $validTagIds = \App\Models\Tag::whereIn('id', $intTagIds)
+
             ->visibleTo($companyId)
+
             ->pluck('id')
+
             ->toArray();
+
 
         $invalidTagIds = array_diff($intTagIds, $validTagIds);
 
+
         if (!empty($invalidTagIds)) {
+
             Log::warning('ProductController: Filtered out invalid/inaccessible tag IDs', [
+
                 'product_id'     => $productId,
+
                 'company_id'     => $companyId,
+
                 'sent_tag_ids'   => $intTagIds,
+
                 'invalid_tag_ids'=> array_values($invalidTagIds),
+
                 'valid_tag_ids'  => $validTagIds,
+
             ]);
+
         }
+
+
+        // 1) حذف pivot entries الخاصة بالشركة الحالية فقط (override سابق)
 
         DB::table('product_tags')
+
             ->where('product_id', $productId)
+
             ->where('created_by', $companyId)
+
             ->delete();
 
+
         if (empty($validTagIds)) {
+
             return;
+
         }
+
+
+        // 2) ⚡ FIX: جلب التاجز الموجودة فعلياً في pivot (عبر أي owner آخر)
+
+        //    هذا يمنع إنشاء duplicate rows لما الشركة تعدّل منتج
+
+        //    السوبر ادمن بدون تغيير التاجز.
+
+        $existingTagIds = DB::table('product_tags')
+
+            ->where('product_id', $productId)
+
+            ->pluck('tag_id')
+
+            ->map(fn($id) => (int) $id)
+
+            ->toArray();
+
+
+        // 3) الإدراج فقط للتاجز الجديدة فعلاً (اللي الشركة ضافتها بنفسها)
+
+        $newTagIds = array_values(array_diff($validTagIds, $existingTagIds));
+
+
+        if (empty($newTagIds)) {
+
+            // كل التاجز موجودة بالفعل في pivot (مثلاً عبر السوبر ادمن)
+
+            // → لا ننشئ duplicates
+
+            Log::info('ProductController@saveTagsToPivot: No new tags to insert (all already exist in pivot)', [
+
+                'product_id'         => $productId,
+
+                'company_id'         => $companyId,
+
+                'submitted_tag_ids'  => $validTagIds,
+
+                'already_in_pivot'   => $existingTagIds,
+
+            ]);
+
+            return;
+
+        }
+
 
         $insertData = [];
+
         $now = now();
-        foreach ($validTagIds as $tagId) {
+
+        foreach ($newTagIds as $tagId) {
+
             $insertData[] = [
+
                 'product_id' => $productId,
+
                 'tag_id'     => (int) $tagId,
+
                 'created_by' => $companyId,
+
                 'created_at' => $now,
+
                 'updated_at' => $now,
+
             ];
+
         }
 
+
+        Log::info('ProductController@saveTagsToPivot: Inserting new tag pivot rows', [
+
+            'product_id'         => $productId,
+
+            'company_id'         => $companyId,
+
+            'submitted_tag_ids'  => $validTagIds,
+
+            'already_in_pivot'   => $existingTagIds,
+
+            'new_tag_ids'        => $newTagIds,
+
+        ]);
+
+
         try {
+
             DB::table('product_tags')->insert($insertData);
+
         } catch (\Illuminate\Database\QueryException $e) {
+
             if (str_contains($e->getMessage(), 'Duplicate entry')) {
+
                 Log::warning('ProductController: Duplicate tag pivot entry, inserting one by one', [
+
                     'product_id' => $productId,
+
                     'company_id' => $companyId,
+
                 ]);
+
                 foreach ($insertData as $row) {
+
                     try {
+
                         DB::table('product_tags')->insert($row);
+
                     } catch (\Illuminate\Database\QueryException $e2) {
+
                         if (!str_contains($e2->getMessage(), 'Duplicate entry')) {
+
                             throw $e2;
+
                         }
+
                     }
+
                 }
+
             } else {
+
                 throw $e;
+
             }
+
         }
+
     }
 
     /**
@@ -2401,9 +2487,81 @@ class ProductController extends Controller
      */
     private function isFieldDifferent($current, $new): bool
     {
-        return $this->normalizeForImportCompare($current)
-            !== $this->normalizeForImportCompare($new);
+        return $this->normalizeForCompare($current)
+            !== $this->normalizeForCompare($new);
     }
+
+        private function normalizeForCompare($value)
+    {
+        // null أو فارغ → ''
+        if ($value === null || $value === '' || $value === []) {
+            return '';
+        }
+
+        // Boolean
+        if (is_bool($value)) {
+            return $value ? '1' : '0';
+        }
+
+        // Array
+        if (is_array($value)) {
+            $normalized = array_map(fn($v) => is_string($v) ? trim($v) : $v, $value);
+            $normalized = array_filter($normalized, fn($v) => $v !== '' && $v !== null);
+            sort($normalized);
+            return implode('|', $normalized);
+        }
+
+        // Numeric → float string
+        if (is_numeric($value)) {
+            $float = floatval($value);
+            // لو رقم صحيح، رجّعه كـ int string (10.0 → "10" مو "10.00")
+            if ($float == intval($float)) {
+                return (string) intval($float);
+            }
+            return (string) $float;
+        }
+
+        // String
+        $trimmed = trim((string) $value);
+        // لو النص يمثل رقم، عالجه كرقم
+        if (is_numeric($trimmed)) {
+            $float = floatval($trimmed);
+            if ($float == intval($float)) {
+                return (string) intval($float);
+            }
+            return (string) $float;
+        }
+        return $trimmed;
+    }
+
+        private function findOrCreateTagByName(string $name, int $companyId): ?Tag
+    {
+        $trimmed = trim($name);
+        if ($trimmed === '') return null;
+
+        $superAdminId = getSuperAdminCompanyId();
+
+        // ابحث بالاسم (case-insensitive) ضمن tags الشركة أو السوبر ادمن
+        $existing = Tag::whereRaw('LOWER(name) = ?', [mb_strtolower($trimmed)])
+            ->where(function ($q) use ($companyId, $superAdminId) {
+                $q->where('company_id', $companyId)
+                  ->orWhere('company_id', $superAdminId)
+                  ->orWhereNull('company_id');
+            })
+            ->first();
+
+        if ($existing) return $existing;
+
+        return Tag::create([
+            'name'       => $trimmed,
+            'slug'       => Str::slug($trimmed),
+            'color'      => '#6366f1',
+            'status'     => 'active',
+            'company_id' => $companyId,
+            'created_by' => $companyId,
+        ]);
+    }
+
 
     /**
      * تطبيع القيمة للمقارنة في الاستيراد
