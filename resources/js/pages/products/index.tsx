@@ -291,8 +291,8 @@ export default function Products() {
         });
     }
 
-    // Add Import from Excel button - SUPER ADMIN ONLY
-    if (isSuperAdmin) {
+    // Add Import from Excel button — SUPER ADMIN + COMPANY
+    if (isSuperAdmin || isCompany) {
         pageActions.push({
             label: t('Import from Excel'),
             icon: <FileUp className="h-4 w-4 mr-2" />,
@@ -425,11 +425,6 @@ export default function Products() {
             key: 'brand',
             label: t('Brand'),
             render: (value: any) => value?.name || t('-')
-        },
-        {
-            key: 'assigned_user',
-            label: t('Assigned To'),
-            render: (value: any) => value?.name || t('Unassigned')
         },
         {
             key: 'status',
@@ -603,20 +598,7 @@ export default function Products() {
                             onChange: setSelectedStatus,
                             options: statusOptions
                         },
-                        ...(isCompany ? [{
-                            name: 'assigned_to',
-                            label: t('Assigned To'),
-                            type: 'select',
-                            value: selectedAssignee,
-                            onChange: setSelectedAssignee,
-                            options: [
-                                { value: 'all', label: t('All Users') },
-                                ...users.map((user: any) => ({
-                                    value: user.id.toString(),
-                                    label: user.name
-                                }))
-                            ]
-                        }] : [])
+                        // ⚡ REMOVED: assigned_to filter (العمود لم يعد موجوداً)
                     ]}
                     showFilters={showFilters}
                     setShowFilters={setShowFilters}
@@ -945,9 +927,9 @@ export default function Products() {
             />
 
             {/* ═══════════════════════════════════════════════════════════════
-                Import from Excel Modal - Super Admin Only
+                Import from Excel Modal - Super Admin + Company
             ═══════════════════════════════════════════════════════════════ */}
-            {isSuperAdmin && (
+            {(isSuperAdmin || isCompany) && (
                 <ImportExcelModal
                     open={isImportExcelModalOpen}
                     onClose={() => setIsImportExcelModalOpen(false)}
