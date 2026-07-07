@@ -474,11 +474,7 @@ export default function ProductEdit() {
             clientErrors['price'] = t('Price must be at least 0');
         }
 
-        // ⚡ FIX: فقط نتحقق من sale_price < price لو المستخدم أدخل قيمة فعلية
-        const salePriceProvided = !!(data.sale_price && data.sale_price !== '');
-        if (salePriceProvided && parseFloat(data.sale_price) >= parseFloat(data.price)) {
-            clientErrors['sale_price'] = t('Regular price must be less than the wholesale price');
-        }
+        // ⚡ REMOVED: sale_price validation — now accepts any value (same, less, or greater than price)
 
         if (Object.keys(clientErrors).length > 0) {
             Object.entries(clientErrors).forEach(([key, msg]) => setError(key as any, msg));
@@ -912,7 +908,7 @@ export default function ProductEdit() {
                                             id="frequency"
                                             value={data.frequency}
                                             onChange={(e) => handleInputChange('frequency', e.target.value)}
-                                            placeholder={t('e.g., 2x daily, once daily')}
+                                            placeholder={t('Used by EDS machine')}
                                         />
                                         {isLocked && (
                                             <p className="text-xs text-blue-600 flex items-center gap-1">
