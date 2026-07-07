@@ -130,6 +130,52 @@ class Product extends BaseModel implements HasMedia
             ->nonQueued();
     }
 
+    /**
+     * ════════════════════════════════════════════════════════════════════
+     * Accessor: يرجّع tags فريدة (بدون تكرار) مرتبة حسب الاسم.
+     *
+     * يعطي أولوية لـ tags الشركة الحالية (لو موجودة)، ثم tags السوبر ادمن.
+     * هذا يمنع ظهور التاجات مكررة في فورم التعديل عند تعديل منتج سوبر ادمن.
+     *
+     * منطق العمل:
+     *   - لو للشركة override على التاجات (لها صفوف في product_tags بـ created_by = companyId)
+     *     → رجّع تاجات الشركة فقط
+     *   - لو مفيش override للشركة → رجّع تاجات السوبر ادمن الأصلية
+     *
+     * @return \Illuminate\Database\Eloquent\Collection
+     * ════════════════════════════════════════════════════════════════════
+     */
+    public function getUniqueTagsAttribute()
+    {
+        $companyId = createdBy();
+        $superAdminId = getSuperAdminCompanyId();
+
+        // 1) اجلب tag IDs الخاصة بالشركة على هذا المنتج
+        $companyTagIds = DB::table('product_tags')
+            ->where('product_id', $this->id)
+            ->where('created_by', $companyId)
+            ->pluck('tag_id')
+            ->toArray();
+
+        // لو الشركة عندها override → رجّع تاجاتها فقط
+        if (!empty($companyTagIds)) {
+            return \App\Models\Tag::whereIn('id', $companyTagIds)
+                ->orderBy('name')
+                ->get();
+        }
+
+        // 2) Fallback: اجلب tag IDs الخاصة بالسوبر ادمن
+        $superAdminTagIds = DB::table('product_tags')
+            ->where('product_id', $this->id)
+            ->where('created_by', $superAdminId)
+            ->pluck('tag_id')
+            ->toArray();
+
+        return \App\Models\Tag::whereIn('id', $superAdminTagIds)
+            ->orderBy('name')
+            ->get();
+    }
+
     public function getMainImageUrlAttribute()
     {
         if ($this->main_image_id) {
@@ -297,8 +343,8 @@ class Product extends BaseModel implements HasMedia
             'product_id',
             'primary_indication_id'
         )
-        ->withTimestamps()
-        ->orderBy('name');
+            ->withTimestamps()
+            ->orderBy('name');
     }
 
     /**
