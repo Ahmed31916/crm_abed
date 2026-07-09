@@ -18,12 +18,11 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 /* ============================================================
  * MultiSelect — self-contained multi-select dropdown
  * Used for Tags and Primary Indications inputs.
- * No external dependencies beyond shadcn Checkbox + Badge + Input.
  * ============================================================ */
 type MultiSelectOption = {
-    value: string;          // unique value (id or name)
-    label: string;          // display label
-    color?: string;         // optional hex color (for tags)
+    value: string;
+    label: string;
+    color?: string;
 };
 
 interface MultiSelectProps {
@@ -34,10 +33,10 @@ interface MultiSelectProps {
     emptyMessage?: string;
     searchPlaceholder?: string;
     searchable?: boolean;
-    maxItems?: number;          // optional cap on selected items
+    maxItems?: number;
     error?: string;
     required?: boolean;
-    maxHeight?: number;         // dropdown list max height in px
+    maxHeight?: number;
 }
 
 function MultiSelect({
@@ -59,7 +58,6 @@ function MultiSelect({
     const containerRef = useRef<HTMLDivElement>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
 
-    // Close on outside click + Escape key
     useEffect(() => {
         if (!open) return;
         const handleClick = (e: MouseEvent) => {
@@ -76,7 +74,6 @@ function MultiSelect({
         };
         document.addEventListener('mousedown', handleClick);
         document.addEventListener('keydown', handleKey);
-        // Autofocus search when opening
         setTimeout(() => searchInputRef.current?.focus(), 0);
         return () => {
             document.removeEventListener('mousedown', handleClick);
@@ -84,14 +81,12 @@ function MultiSelect({
         };
     }, [open]);
 
-    // Memoized filtered list (case-insensitive)
     const filtered = useMemo(() => {
         if (!search.trim()) return options;
         const q = search.toLowerCase().trim();
         return options.filter(opt => opt.label.toLowerCase().includes(q));
     }, [options, search]);
 
-    // Build a quick lookup map for selected labels
     const optionMap = useMemo(() => {
         const m = new Map<string, MultiSelectOption>();
         options.forEach(o => m.set(o.value, o));
@@ -117,7 +112,6 @@ function MultiSelect({
 
     return (
         <div ref={containerRef} className="relative">
-            {/* Trigger */}
             <div
                 role="combobox"
                 aria-expanded={open}
@@ -170,7 +164,6 @@ function MultiSelect({
                 <ChevronDown className={`h-4 w-4 opacity-50 shrink-0 ml-2 transition-transform ${open ? 'rotate-180' : ''}`} />
             </div>
 
-            {/* Dropdown panel */}
             {open && (
                 <div
                     className="absolute z-50 mt-1 w-full bg-popover border rounded-md shadow-md flex flex-col"
@@ -287,6 +280,9 @@ export default function ProductCreate() {
         // ===== Full Name (health_products) =====
         full_name: '',
 
+        // ===== Frequency (products.frequency) =====
+        frequency: '',
+
         // ===== Health Product Fields =====
         supports: '',
         useful_for: '',
@@ -319,10 +315,8 @@ export default function ProductCreate() {
         // ===== Images (Spatie MediaLibrary) =====
         main_image_id: null as number | null,
         additional_image_ids: [] as number[],
-
     });
 
-    // Dosing N/A toggle: disable all dosing fields when checked
     const [dosingDisabled, setDosingDisabled] = useState(false);
 
     useEffect(() => {
@@ -333,14 +327,6 @@ export default function ProductCreate() {
         setData(name as any, value as any);
     };
 
-    // Auto-set bottle_size_unit based on product_form
-    useEffect(() => {
-        // bottle_size_unit is auto-set server-side:
-        // Liquid → 'oz', Caps → 'caps'
-        // We just show a hint in the UI
-    }, [data.product_form]);
-
-    // Prepare option arrays for MultiSelect (memoized)
     const tagOptions: MultiSelectOption[] = useMemo(() => {
         return (tags ?? []).map((tag: any) => ({
             value: tag.id.toString(),
@@ -351,9 +337,17 @@ export default function ProductCreate() {
 
     const primaryIndicationOptions: MultiSelectOption[] = useMemo(() => {
         return (primaryIndications ?? []).map((ind: { id: number; name: string }) => ({
-            value: ind.name,
+            value: ind.id.toString(),
             label: ind.name,
         }));
+    }, [primaryIndications]);
+
+    const primaryIndicationMap = useMemo(() => {
+        const m = new Map<string, string>();
+        (primaryIndications ?? []).forEach((ind: { id: number; name: string }) => {
+            m.set(ind.id.toString(), ind.name);
+        });
+        return m;
     }, [primaryIndications]);
 
     const pairsWellWithOptions: MultiSelectOption[] = useMemo(() => {
@@ -371,7 +365,6 @@ export default function ProductCreate() {
 
     const requiredFields: { name: keyof typeof data, label: string }[] = [
         { name: 'name', label: t('Product Name') },
-        { name: 'product_sku', label: t('SKU') },
         { name: 'product_form', label: t('Product Form') },
         { name: 'bottle_size', label: t('Bottle Size') },
         { name: 'price', label: t('Price') },
@@ -396,9 +389,7 @@ export default function ProductCreate() {
             clientErrors['price'] = t('Price must be at least 0');
         }
 
-        if (data.sale_price !== '' && data.sale_price && parseFloat(data.sale_price) >= parseFloat(data.price)) {
-            clientErrors['sale_price'] = t('Sale price must be less than the regular price');
-        }
+        // ⚡ REMOVED: sale_price validation — now accepts any value (same, less, or greater than price)
 
         if (Object.keys(clientErrors).length > 0) {
             Object.entries(clientErrors).forEach(([key, msg]) => setError(key as any, msg));
@@ -408,6 +399,15 @@ export default function ProductCreate() {
         toast.loading(t('Creating product...'));
 
         post(route('products.store'), {
+            preserveScroll: true,
+            preserveState: true,
+            // ⚡ FIX: استخدم transform لضمان sale_price = price لو فاضي
+            transform: (formData) => ({
+                ...formData,
+                sale_price: (!formData.sale_price || formData.sale_price === '')
+                    ? formData.price
+                    : formData.sale_price,
+            }),
             onSuccess: (page: any) => {
                 toast.dismiss();
                 if (page.props.flash?.success) {
@@ -496,16 +496,17 @@ export default function ProductCreate() {
                                     </div>
 
                                     <div className="space-y-2">
-                                        <Label htmlFor="product_sku" className="text-sm font-medium" required>
+                                        <Label htmlFor="product_sku" className="text-sm font-medium">
                                             {t('Product SKU / Item Number')}
                                         </Label>
                                         <Input
                                             id="product_sku"
                                             value={data.product_sku}
                                             onChange={(e) => handleInputChange('product_sku', e.target.value)}
-                                            placeholder={t('Enter product code or SKU')}
+                                            placeholder={t('Leave empty to auto-generate')}
                                             className={errors.product_sku ? 'border-red-500' : ''}
                                         />
+                                        <p className="text-xs text-muted-foreground">{t('Leave empty to auto-generate')}</p>
                                         {errors.product_sku && <p className="text-xs text-red-500">{errors.product_sku}</p>}
                                     </div>
                                 </div>
@@ -526,16 +527,11 @@ export default function ProductCreate() {
                                             </SelectContent>
                                         </Select>
                                         {errors.product_form && <p className="text-xs text-red-500">{errors.product_form}</p>}
-                                        {data.product_form && (
-                                            <p className="text-xs text-muted-foreground">
-                                                {data.product_form === 'Liquid' ? t('Unit: oz') : t('Unit: caps')}
-                                            </p>
-                                        )}
                                     </div>
 
                                     <div className="space-y-2">
                                         <Label htmlFor="bottle_size" className="text-sm font-medium" required>
-                                            {t('Bottle Size / Count')}
+                                            {t('Bottle Size')}
                                         </Label>
                                         <Input
                                             id="bottle_size"
@@ -552,7 +548,7 @@ export default function ProductCreate() {
 
                                     <div className="space-y-2">
                                         <Label className="text-sm font-medium">
-                                            {t('Supplier / Brand')}
+                                            {t('Supplier')}
                                         </Label>
                                         <Select value={data.brand_id} onValueChange={(value) => handleInputChange('brand_id', value)}>
                                             <SelectTrigger className={errors.brand_id ? 'border-red-500' : ''}>
@@ -592,28 +588,30 @@ export default function ProductCreate() {
                                     )}
                                 </div>
 
-                                {/* ============ Pairs Well With — MultiSelect ============ */}
-                                <div className="space-y-2">
-                                    <Label className="text-sm font-medium">
-                                        {t('Pairs Well With')}
-                                    </Label>
-                                    <MultiSelect
-                                        options={pairsWellWithOptions}
-                                        value={data.pairs_well_with}
-                                        onChange={(val) => handleInputChange('pairs_well_with', val)}
-                                        placeholder={t('Select products...')}
-                                        emptyMessage={t('No other products available')}
-                                        searchPlaceholder={t('Search products...')}
-                                    />
-                                    {data.pairs_well_with.length > 0 && (
-                                        <p className="text-xs text-muted-foreground">
-                                            {data.pairs_well_with.length} {data.pairs_well_with.length === 1 ? t('product selected') : t('products selected')}
-                                        </p>
-                                    )}
-                                    <p className="text-xs text-muted-foreground">{t('Select products that pair well with this one.')}</p>
-                                </div>
+                                {/* ============ Pairs Well With — Only for Super Admin ============ */}
+                                {!isCompany && (
+                                    <div className="space-y-2">
+                                        <Label className="text-sm font-medium">
+                                            {t('Pairs Well With')}
+                                        </Label>
+                                        <MultiSelect
+                                            options={pairsWellWithOptions}
+                                            value={data.pairs_well_with}
+                                            onChange={(val) => handleInputChange('pairs_well_with', val)}
+                                            placeholder={t('Select products...')}
+                                            emptyMessage={t('No other products available')}
+                                            searchPlaceholder={t('Search products...')}
+                                        />
+                                        {data.pairs_well_with.length > 0 && (
+                                            <p className="text-xs text-muted-foreground">
+                                                {data.pairs_well_with.length} {data.pairs_well_with.length === 1 ? t('product selected') : t('products selected')}
+                                            </p>
+                                        )}
+                                        <p className="text-xs text-muted-foreground">{t('Select products that pair well with this one.')}</p>
+                                    </div>
+                                )}
 
-                                {/* Price + Sale Price */}
+                                {/* Price + Regular Price (Retail price) */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <Label htmlFor="price" className="text-sm font-medium" required>
@@ -632,7 +630,7 @@ export default function ProductCreate() {
                                     </div>
                                     <div className="space-y-2">
                                         <Label htmlFor="sale_price" className="text-sm font-medium">
-                                            {t('Sale Price')}
+                                            {t('Regular Price (Retail price)')}
                                         </Label>
                                         <Input
                                             id="sale_price"
@@ -641,8 +639,10 @@ export default function ProductCreate() {
                                             min="0"
                                             value={data.sale_price}
                                             onChange={(e) => handleInputChange('sale_price', e.target.value)}
+                                            placeholder={t('Leave empty to use Price value')}
                                             className={errors.sale_price ? 'border-red-500' : ''}
                                         />
+                                        <p className="text-xs text-muted-foreground">{t('Leave empty to use Price value')}</p>
                                         {errors.sale_price && <p className="text-xs text-red-500">{errors.sale_price}</p>}
                                     </div>
                                 </div>
@@ -685,8 +685,8 @@ export default function ProductCreate() {
                                     />
                                 </div>
 
-                                {/* Status + Tax + Weight */}
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                {/* Status + Tax + Weight + Frequency */}
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                                     <div className="space-y-2">
                                         <Label className="text-sm font-medium">{t('Status')}</Label>
                                         <Select value={data.status} onValueChange={(value) => handleInputChange('status', value)}>
@@ -729,6 +729,18 @@ export default function ProductCreate() {
                                             placeholder={t('e.g., 0.5')}
                                         />
                                     </div>
+                                    {/* ⚡ NEW: Frequency Field */}
+                                    <div className="space-y-2">
+                                        <Label htmlFor="frequency" className="text-sm font-medium">
+                                            {t('Frequency')}
+                                        </Label>
+                                        <Input
+                                            id="frequency"
+                                            value={data.frequency}
+                                            onChange={(e) => handleInputChange('frequency', e.target.value)}
+                                            placeholder={t('Used by EDS machine')}
+                                        />
+                                    </div>
                                 </div>
 
                                 {/* Full Name */}
@@ -740,7 +752,7 @@ export default function ProductCreate() {
                                         id="full_name"
                                         value={data.full_name}
                                         onChange={(e) => handleInputChange('full_name', e.target.value)}
-                                        placeholder={t('Full product name with brand/line details')}
+                                        placeholder={t('Full product name with supplier/line details')}
                                     />
                                     <p className="text-xs text-muted-foreground">{t('If different from the short name above')}</p>
                                 </div>
@@ -851,7 +863,7 @@ export default function ProductCreate() {
                                 <CardDescription>{t('Clinical and health-specific information')}</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4 pt-4">
-                                {/* ============ Primary Indications — MultiSelect ============ */}
+                                {/* Primary Indications */}
                                 <div className="space-y-2">
                                     <Label className="text-sm font-medium">{t('Primary Indications')}</Label>
                                     <MultiSelect
@@ -865,9 +877,9 @@ export default function ProductCreate() {
                                     />
                                     {data.primary_indications.length > 0 && (
                                         <div className="flex flex-wrap gap-1 mt-2">
-                                            {data.primary_indications.map((ind: string) => (
-                                                <Badge key={ind} variant="secondary" className="text-xs">
-                                                    {ind}
+                                            {data.primary_indications.map((indId: string) => (
+                                                <Badge key={indId} variant="secondary" className="text-xs">
+                                                    {primaryIndicationMap.get(indId) ?? `#${indId}`}
                                                 </Badge>
                                             ))}
                                         </div>
@@ -968,7 +980,6 @@ export default function ProductCreate() {
                                     ))}
                                 </div>
 
-                                {/* Dosing N/A Toggle */}
                                 <div className="flex items-center gap-3 pt-2 border-t">
                                     <Checkbox
                                         id="dosing_na"
@@ -976,7 +987,6 @@ export default function ProductCreate() {
                                         onCheckedChange={(checked) => {
                                             handleInputChange('dosing_na', !!checked);
                                             if (checked) {
-                                                // Clear dosing fields when N/A
                                                 handleInputChange('dosing_upon_rising', '');
                                                 handleInputChange('dosing_breakfast', '');
                                                 handleInputChange('dosing_between_meals_am', '');
@@ -1004,7 +1014,6 @@ export default function ProductCreate() {
                                 <CardDescription>{t('Visible only to your store customers')}</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4 pt-4">
-                                {/* Practitioner Notes */}
                                 <div className="space-y-2">
                                     <Label htmlFor="practitioner_notes" className="text-sm font-medium">{t('Practitioner Notes')}</Label>
                                     <Textarea
@@ -1017,7 +1026,6 @@ export default function ProductCreate() {
                                     <p className="text-xs text-muted-foreground">{t('Visible only to your store customers')}</p>
                                 </div>
 
-                                {/* Custom Primary Indications */}
                                 <div className="space-y-2">
                                     <Label className="text-sm font-medium">{t('Custom Primary Indications')}</Label>
                                     <Textarea
@@ -1029,7 +1037,6 @@ export default function ProductCreate() {
                                     <p className="text-xs text-muted-foreground">{t('Select from list or type to add custom indications')}</p>
                                 </div>
 
-                                {/* Custom Dosing Notes */}
                                 <div className="space-y-2">
                                     <Label htmlFor="custom_dosing_notes" className="text-sm font-medium">{t('Custom Dosing Notes')}</Label>
                                     <Textarea

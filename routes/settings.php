@@ -48,9 +48,7 @@ Route::middleware(['auth', 'verified', 'plan.access'])->group(function () {
     Route::post('/invoice-stripe-confirm', [InvoiceStripePaymentController::class, 'confirmPayment'])->name('settings.invoice.stripe.confirm');
 
     // Profile settings page with profile and password sections
-    Route::get('profile', function () {
-        return Inertia::render('settings/profile-settings');
-    })->name('profile');
+    Route::get('profile', [ProfileController::class, 'edit'])->name('profile');
 
     // Routes for form submissions
     Route::patch('profile', [ProfileController::class, 'update'])->name('profile.update');

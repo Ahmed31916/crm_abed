@@ -130,6 +130,52 @@ class Product extends BaseModel implements HasMedia
             ->nonQueued();
     }
 
+    /**
+     * ════════════════════════════════════════════════════════════════════
+     * Accessor: يرجّع tags فريدة (بدون تكرار) مرتبة حسب الاسم.
+     *
+     * يعطي أولوية لـ tags الشركة الحالية (لو موجودة)، ثم tags السوبر ادمن.
+     * هذا يمنع ظهور التاجات مكررة في فورم التعديل عند تعديل منتج سوبر ادمن.
+     *
+     * منطق العمل:
+     *   - لو للشركة override على التاجات (لها صفوف في product_tags بـ created_by = companyId)
+     *     → رجّع تاجات الشركة فقط
+     *   - لو مفيش override للشركة → رجّع تاجات السوبر ادمن الأصلية
+     *
+     * @return \Illuminate\Database\Eloquent\Collection
+     * ════════════════════════════════════════════════════════════════════
+     */
+    public function getUniqueTagsAttribute()
+    {
+        $companyId = createdBy();
+        $superAdminId = getSuperAdminCompanyId();
+
+        // 1) اجلب tag IDs الخاصة بالشركة على هذا المنتج
+        $companyTagIds = DB::table('product_tags')
+            ->where('product_id', $this->id)
+            ->where('created_by', $companyId)
+            ->pluck('tag_id')
+            ->toArray();
+
+        // لو الشركة عندها override → رجّع تاجاتها فقط
+        if (!empty($companyTagIds)) {
+            return \App\Models\Tag::whereIn('id', $companyTagIds)
+                ->orderBy('name')
+                ->get();
+        }
+
+        // 2) Fallback: اجلب tag IDs الخاصة بالسوبر ادمن
+        $superAdminTagIds = DB::table('product_tags')
+            ->where('product_id', $this->id)
+            ->where('created_by', $superAdminId)
+            ->pluck('tag_id')
+            ->toArray();
+
+        return \App\Models\Tag::whereIn('id', $superAdminTagIds)
+            ->orderBy('name')
+            ->get();
+    }
+
     public function getMainImageUrlAttribute()
     {
         if ($this->main_image_id) {
@@ -276,6 +322,101 @@ class Product extends BaseModel implements HasMedia
     public function healthProducts()
     {
         return $this->hasMany(\App\Models\HealthProduct::class);
+    }
+
+    // =========================================================================
+    // =========== NEW: Primary Indications Pivot (Many-to-Many) ==============
+    // =========================================================================
+
+    /**
+     * العلاقة Many-to-Many مع PrimaryIndication.
+     *
+     * يستبدل هذا الـ JSON القديم في health_products.primary_indications.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany
+     */
+    public function primaryIndications(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            \App\Models\PrimaryIndication::class,
+            'product_primary_indications',
+            'product_id',
+            'primary_indication_id'
+        )
+            ->withTimestamps()
+            ->orderBy('name');
+    }
+
+    /**
+     * Accessor: أسماء الـ Primary Indications كـ array من النصوص.
+     *
+     * يحل محل `$product->healthProduct->primary_indications` القديم.
+     *
+     * @return array<string>
+     */
+    public function getPrimaryIndicationNamesAttribute(): array
+    {
+        // نستخدم pluck بدل map لتقليل الاستعلامات عند استخدام eager loading
+        return $this->primaryIndications()
+            ->pluck('name')
+            ->toArray();
+    }
+
+    /**
+     * Helper: جلب أسماء الـ Primary Indications مع دعم Override.
+     *
+     * أولوية البيانات:
+     *   1. لو الشركة عندا override على المنتج → نستخدم override->primary_indications
+     *   2. لو ما في override → نستخدم العلاقة belongsToMany الجديدة
+     *
+     * @param int|null $companyId  معرف الشركة (للبحث عن override)
+     * @return array<string>
+     */
+    public function getPrimaryIndicationNames(?int $companyId = null): array
+    {
+        $companyId = $companyId ?? createdBy();
+
+        // 1. ابحث عن override للشركة
+        $override = \App\Models\ProductCompanyOverride::where('product_id', $this->id)
+            ->where('company_id', $companyId)
+            ->first();
+
+        if ($override && $override->primary_indications !== null) {
+            $indications = $override->primary_indications;
+            return is_array($indications) ? array_values($indications) : [];
+        }
+
+        // 2. fallback: العلاقة belongsToMany
+        return $this->primaryIndications()
+            ->pluck('name')
+            ->toArray();
+    }
+
+    /**
+     * Helper: جلب IDs الـ Primary Indications (مفيد للـ form editing).
+     *
+     * @return array<int>
+     */
+    public function getPrimaryIndicationIds(): array
+    {
+        return $this->primaryIndications()
+            ->pluck('primary_indications.id')
+            ->toArray();
+    }
+
+    /**
+     * Sync Primary Indications عبر IDs.
+     *
+     * يستقبل array من IDs ويعمل sync على الـ pivot.
+     * مفيد للـ ProductController@store و @update.
+     *
+     * @param array<int|string> $ids
+     * @return void
+     */
+    public function syncPrimaryIndications(array $ids): void
+    {
+        $intIds = array_map('intval', array_filter($ids, fn($id) => !empty($id)));
+        $this->primaryIndications()->sync($intIds);
     }
 
 // ========================================================================

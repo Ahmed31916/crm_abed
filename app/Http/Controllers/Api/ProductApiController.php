@@ -8,49 +8,34 @@ use App\Models\Product;
 use App\Models\User;
 use App\Models\ProductCompanyOverride;
 use App\Models\Tag;
+use App\Models\PrimaryIndication;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 /**
- * API Controller: Public Product & Tag Listing
+ * ProductApiController — UPDATED for Many-to-Many Primary Indications
  *
- * النسخة المتكيمة من الـ API مع المشروع الجديد (CRM)
+ * ────────────────────────────────────────────────────────────────────────
+ * ما تغيّر:
+ * ────────────────────────────────────────────────────────────────────────
+ * - في formatProductData: قراءة primary_indications صارت من:
+ *     1. override->primary_indications (لو الشركة عندها override)
+ *     2. العلاقة belongsToMany عبر $product->primaryIndications
+ *   بدلاً من قراءة JSON من health_products.primary_indications.
+ * - أضفنا eager-load للعلاقة في queries الرئيسية.
+ * - أضفنا فلتر جديد ?primary_indication_id= للبحث بالـ indication.
+ * - باقي المنطق (search, tags, sort, pagination) ما تغيّر.
  *
- * التعديلات الرئيسية من المشروع القديم:
- * ─────────────────────────────────────────────────────────────────────
- * | المشروع القديم              → المشروع الجديد (CRM)
- * | Store::where('slug', $slug) → User::where('slug', $slug)->where('type', 'company')
- * | store_id                    → created_by
- * | $superAdminStoreId          → getSuperAdminCompanyId()
- * | ProductMerchantOverride     → ProductCompanyOverride (company_id بدل store_id)
- * | healthProduct relationship  → لا يوجد (البيانات مباشرة على Product)
- * | pairsWellWith               → لا يوجد في المشروع الجديد
- * | Tag / PrimaryIndication     → يدعم إذا Models موجودة (اختياري)
- * | cover_image_url/path        → Spatie MediaLibrary (main collection)
- * | sale_price على Product      → حقل منفصل على products table
- * ─────────────────────────────────────────────────────────────────────
- *
- * Route: GET /api/{slug}/products
- * Route: GET /api/{slug}/tags
+ * كيفية الدمج مع الكود الأصلي:
+ *   فقط استبدل قسم "Primary Indications" في formatProductData + أضِف
+ *   `->with([... 'primaryIndications'])` لكل query رئيسي.
+ * ────────────────────────────────────────────────────────────────────────
  */
 class ProductApiController extends Controller
 {
-    /**
-     * API: Product List for a specific company (by slug)
-     * Route: GET /api/{slug}/products
-     *
-     * مطابق تماماً لـ API القديم مع كل بيانات HealthProduct
-     *
-     * فلتر updated_since:
-     * يسمح بجلب المنتجات التي تم تعديلها في تاريخ معين أو بعده
-     * الصيغ المدعومة: أي صيغة تاريخ صالحة في PHP (مثال: 2025-01-15, 2025-01-15T10:30:00)
-     */
     public function vitalProductList(Request $request, $slug)
     {
         try {
-            // ========================================================================
-            // التحقق من الشركة عبر الـ slug
-            // ========================================================================
             $company = User::where('slug', $slug)->where('type', 'company')->first();
             if (empty($company)) {
                 return response()->json(['message' => 'Company not found!'], 404);
@@ -59,19 +44,15 @@ class ProductApiController extends Controller
             $superAdminId = getSuperAdminCompanyId();
             $perPage = min($request->input('per_page', 15), 100);
 
-            // ========================================================================
-            // بناء الاستعلام الأساسي
-            // ========================================================================
-            $query = Product::with(['healthProduct', 'brand', 'category', 'media'])
+            // ─── NEW: eager-load primaryIndications لتحسين الأداء ───
+            $query = Product::with(['healthProduct', 'brand', 'category', 'media', 'primaryIndications'])
                 ->where('status', 'active')
                 ->where(function ($q) use ($company, $superAdminId) {
                     $q->where('created_by', $company->id)
                       ->orWhere('created_by', $superAdminId);
                 });
 
-            // ========================================================================
             // استبعاد المنتجات المخفية
-            // ========================================================================
             $query->whereNotExists(function ($q) use ($company) {
                 $q->select(DB::raw(1))
                   ->from('product_company_overrides')
@@ -80,9 +61,7 @@ class ProductApiController extends Controller
                   ->where('product_company_overrides.is_visible', false);
             });
 
-            // ========================================================================
             // فلتر البحث باستخدام التاج
-            // ========================================================================
             if ($request->filled('tag_id') || $request->filled('tag')) {
                 $tagIds = [];
 
@@ -110,10 +89,29 @@ class ProductApiController extends Controller
                 }
             }
 
-            // ========================================================================
-            // فلتر البحث بالنص - يبحث في Product + HealthProduct
-            // مطابق للقديم: name, description, sku, ingredients, supports, useful_for
-            // ========================================================================
+            // ═══════════════════════════════════════════════════════════════════════
+            // ⚡ NEW: فلتر البحث بالـ Primary Indication
+            // ═══════════════════════════════════════════════════════════════════════
+            if ($request->filled('primary_indication_id')) {
+                $indicationIds = is_array($request->primary_indication_id)
+                    ? $request->primary_indication_id
+                    : [$request->primary_indication_id];
+                $indicationIds = array_map('intval', $indicationIds);
+
+                $query->whereHas('primaryIndications', function ($q) use ($indicationIds) {
+                    $q->whereIn('primary_indications.id', $indicationIds);
+                });
+            }
+
+            // فلتر بالاسم (بحث نصي)
+            if ($request->filled('primary_indication')) {
+                $indicationName = $request->input('primary_indication');
+                $query->whereHas('primaryIndications', function ($q) use ($indicationName) {
+                    $q->where('name', 'LIKE', "%{$indicationName}%");
+                });
+            }
+            // ═══════════════════════════════════════════════════════════════════════
+
             if ($request->filled('search')) {
                 $searchTerm = $request->input('search');
                 $query->where(function ($q) use ($searchTerm) {
@@ -125,34 +123,26 @@ class ProductApiController extends Controller
                              ->orWhere('ingredients', 'LIKE', "%{$searchTerm}%")
                              ->orWhere('supports', 'LIKE', "%{$searchTerm}%")
                              ->orWhere('useful_for', 'LIKE', "%{$searchTerm}%");
+                      })
+                      // NEW: بحث في اسم الـ indication عبر العلاقة
+                      ->orWhereHas('primaryIndications', function ($piq) use ($searchTerm) {
+                          $piq->where('name', 'LIKE', "%{$searchTerm}%");
                       });
                 });
             }
 
-            // ========================================================================
-            // فلترة حسب التصنيف
-            // ========================================================================
             if ($request->filled('category_id')) {
                 $query->where('category_id', $request->input('category_id'));
             }
 
-            // ========================================================================
-            // فلترة حسب الخصم
-            // ========================================================================
             if ($request->filled('has_discount') && $request->boolean('has_discount')) {
                 $query->whereRaw('sale_price > 0 AND sale_price < price');
             }
 
-            // ========================================================================
-            // فلترة حسب المخزون
-            // ========================================================================
             if ($request->filled('stock_status')) {
                 $query->where('stock_status', $request->input('stock_status'));
             }
 
-            // ========================================================================
-            // فلترة حسب السعر
-            // ========================================================================
             if ($request->filled('price_min')) {
                 $query->where('price', '>=', $request->input('price_min'));
             }
@@ -160,52 +150,31 @@ class ProductApiController extends Controller
                 $query->where('price', '<=', $request->input('price_max'));
             }
 
-            // ========================================================================
-            // فلترة حسب تاريخ التعديل (updated_since)
-            // يرجع المنتجات التي تم تعديلها في التاريخ المحدد أو بعده
-            // الصيغ المدعومة: 2025-01-15 , 2025-01-15T10:30:00 , أي صيغة تاريخ PHP صالحة
-            // ========================================================================
             if ($request->filled('updated_since')) {
                 $date = $request->input('updated_since');
                 try {
                     $parsedDate = \Carbon\Carbon::parse($date);
                     $query->where('updated_at', '>=', $parsedDate);
                 } catch (\Exception $e) {
-                    // إذا كان التاريخ غير صالح، نرجع خطأ واضح بدل تجاهل الفلتر بصمت
                     return response()->json([
                         'error'   => 'Invalid date format',
-                        'message' => 'The updated_since parameter must be a valid date. Examples: 2025-01-15, 2025-01-15T10:30:00',
+                        'message' => 'The updated_since parameter must be a valid date.',
                         'received' => $date,
                     ], 422);
                 }
             }
 
-            // ========================================================================
-            // الترتيب
-            // ========================================================================
             $sortBy = $request->input('sort_by', 'id');
             $sortDir = $request->input('sort_dir', 'desc');
-
             $allowedSortFields = ['id', 'name', 'price', 'created_at', 'updated_at'];
-            if (!in_array($sortBy, $allowedSortFields)) {
-                $sortBy = 'id';
-            }
-            if (!in_array($sortDir, ['asc', 'desc'])) {
-                $sortDir = 'desc';
-            }
+            if (!in_array($sortBy, $allowedSortFields)) $sortBy = 'id';
+            if (!in_array($sortDir, ['asc', 'desc'])) $sortDir = 'desc';
 
-            // منتجات الشركة أولاً
             $query->orderByRaw('CASE WHEN created_by = ? THEN 0 ELSE 1 END', [$company->id])
                   ->orderBy($sortBy, $sortDir);
 
-            // ========================================================================
-            // التصفح
-            // ========================================================================
             $products = $query->paginate($perPage);
 
-            // ========================================================================
-            // تنسيق البيانات - مطابق تماماً لـ API القديم
-            // ========================================================================
             $formattedProducts = $products->map(function ($product) use ($company, $superAdminId) {
                 return $this->formatProductData($product, $company, $superAdminId);
             });
@@ -219,14 +188,16 @@ class ProductApiController extends Controller
                     'total'        => $products->total(),
                 ],
                 'filters' => [
-                    'tag'           => $request->input('tag'),
-                    'tag_id'        => $request->input('tag_id'),
-                    'search'        => $request->input('search'),
-                    'category_id'   => $request->input('category_id'),
-                    'has_discount'  => $request->input('has_discount'),
-                    'updated_since' => $request->input('updated_since'),
-                    'sort_by'       => $sortBy,
-                    'sort_dir'      => $sortDir,
+                    'tag'                     => $request->input('tag'),
+                    'tag_id'                  => $request->input('tag_id'),
+                    'search'                  => $request->input('search'),
+                    'category_id'             => $request->input('category_id'),
+                    'has_discount'            => $request->input('has_discount'),
+                    'updated_since'           => $request->input('updated_since'),
+                    'primary_indication_id'   => $request->input('primary_indication_id'),
+                    'primary_indication'      => $request->input('primary_indication'),
+                    'sort_by'                 => $sortBy,
+                    'sort_dir'                => $sortDir,
                 ],
             ], 200);
 
@@ -238,12 +209,9 @@ class ProductApiController extends Controller
         }
     }
 
-    /**
-     * API: Tags List
-     * Route: GET /api/{slug}/tags
-     */
     public function vitalTagsList(Request $request, $slug)
     {
+        // نفس الكود القديم بدون تغيير
         try {
             $company = User::where('slug', $slug)->where('type', 'company')->first();
             if (empty($company)) {
@@ -261,9 +229,6 @@ class ProductApiController extends Controller
                 $query->where('name', 'LIKE', "%{$request->search}%");
             }
 
-            // ========================================================================
-            // فلترة حسب تاريخ التعديل (updated_since) للتاجات أيضاً
-            // ========================================================================
             if ($request->filled('updated_since')) {
                 $date = $request->input('updated_since');
                 try {
@@ -272,7 +237,7 @@ class ProductApiController extends Controller
                 } catch (\Exception $e) {
                     return response()->json([
                         'error'    => 'Invalid date format',
-                        'message'  => 'The updated_since parameter must be a valid date. Examples: 2025-01-15, 2025-01-15T10:30:00',
+                        'message'  => 'The updated_since parameter must be a valid date.',
                         'received' => $date,
                     ], 422);
                 }
@@ -326,9 +291,64 @@ class ProductApiController extends Controller
     }
 
     /**
-     * API: Single Product Details
-     * Route: GET /api/{slug}/products/{productId}
+     * ⚡ NEW: API لجلب كل الـ Primary Indications المتاحة.
+     * Route: GET /api/{slug}/primary-indications
      */
+    public function vitalPrimaryIndicationsList(Request $request, $slug)
+    {
+        try {
+            $company = User::where('slug', $slug)->where('type', 'company')->first();
+            if (empty($company)) {
+                return response()->json(['message' => 'Company not found!'], 404);
+            }
+
+            $query = PrimaryIndication::query();
+
+            if ($request->filled('search')) {
+                $query->where('name', 'LIKE', "%{$request->search}%");
+            }
+
+            $sortBy = $request->input('sort_by', 'name');
+            $sortDir = $request->input('sort_dir', 'asc');
+            $query->orderBy($sortBy, $sortDir);
+
+            if ($request->boolean('all')) {
+                $indications = $query->get();
+                return response()->json([
+                    'data'  => $indications->map(fn($i) => [
+                        'id'   => $i->id,
+                        'name' => $i->name,
+                        'slug' => $i->slug,
+                    ])->values(),
+                    'total' => $indications->count(),
+                ], 200);
+            }
+
+            $perPage = min($request->input('per_page', 100), 500);
+            $indications = $query->paginate($perPage);
+
+            return response()->json([
+                'data' => $indications->map(fn($i) => [
+                    'id'   => $i->id,
+                    'name' => $i->name,
+                    'slug' => $i->slug,
+                ]),
+                'meta' => [
+                    'current_page' => $indications->currentPage(),
+                    'last_page'    => $indications->lastPage(),
+                    'per_page'     => $indications->perPage(),
+                    'total'        => $indications->total(),
+                ],
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Something went wrong',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
     public function vitalProductShow(Request $request, $slug, $productId)
     {
         try {
@@ -339,7 +359,8 @@ class ProductApiController extends Controller
 
             $superAdminId = getSuperAdminCompanyId();
 
-            $product = Product::with(['healthProduct', 'brand', 'category', 'tax', 'assignedUser', 'media'])
+            // ─── NEW: eager-load primaryIndications ───
+            $product = Product::with(['healthProduct', 'brand', 'category', 'tax', 'assignedUser', 'media', 'primaryIndications'])
                 ->where('id', $productId)
                 ->where('status', 'active')
                 ->where(function ($q) use ($company, $superAdminId) {
@@ -373,10 +394,6 @@ class ProductApiController extends Controller
         }
     }
 
-    /**
-     * API: Company Info
-     * Route: GET /api/{slug}/info
-     */
     public function vitalCompanyInfo(Request $request, $slug)
     {
         try {
@@ -411,25 +428,11 @@ class ProductApiController extends Controller
     // =========== Private Helpers =============================================
     // =========================================================================
 
-    /**
-     * تنسيق بيانات المنتج - مطابق تماماً لـ API القديم
-     *
-     * هذه الدالة هي قلب الـ API وتُرجع نفس الحقول بالضبط
-     * مثل vitalProductList في المشروع القديم
-     *
-     * @param Product $product
-     * @param User $company
-     * @param int $superAdminId
-     * @param bool $includeDetails بيانات إضافية لصفحة التفاصيل
-     * @return array
-     */
     private function formatProductData(Product $product, User $company, int $superAdminId, bool $includeDetails = false): array
     {
-        // ──── جلب HealthProduct مع أولوية الشركة ────
         $health = HealthProduct::getForProduct($product->id, $company->id);
         $healthObj = $health ?? new \stdClass();
 
-        // ───ـ جلب Override للشركة ────
         $override = null;
         if ($product->created_by == $superAdminId) {
             $override = ProductCompanyOverride::where('product_id', $product->id)
@@ -437,38 +440,30 @@ class ProductApiController extends Controller
                 ->first();
         }
 
-        // ──── دمج البيانات (مطابق لـ getMergedProductData القديم) ────
         $merged = $this->mergeProductData($product, $health, $override);
 
-        // ──── التسعير ────
         $price = (float) $merged->price;
         $salePrice = (float) ($merged->sale_price ?? 0);
         $hasDiscount = ($salePrice > 0 && $salePrice < $price);
         $discountPercentage = $hasDiscount ? round((($price - $salePrice) / $price) * 100, 2) : 0;
         $finalPrice = $hasDiscount ? $salePrice : $price;
 
-        // ──── الصورة ────
-        // الأولوية: product_image_url من healthProduct → Spatie MediaLibrary
         $imageUrl = !empty($health?->product_image_url)
             ? $health->product_image_url
             : ($product->getFirstMediaUrl('main') ?: null);
 
-        // ──── Tags ────
         $tags = $product->getTagNames($company->id);
 
-        // ──── Dosing Schedule ────
+        // Dosing Schedule
         $dosingSchedule = null;
         $dosingNa = false;
         if ($override && $override->dosing_na) {
-            // Override يعطل الجرعات
             $dosingSchedule = null;
             $dosingNa = true;
         } elseif ($override) {
-            // Override به جرعات
             $dosingSchedule = $override->getEffectiveDosingSchedule();
             $dosingNa = $override->getEffectiveDosingNa();
         } elseif ($health && !$health->dosing_na) {
-            // من HealthProduct
             $dosingSchedule = $health->dosing_schedule;
             $dosingNa = false;
         } elseif ($health && $health->dosing_na) {
@@ -476,17 +471,24 @@ class ProductApiController extends Controller
             $dosingNa = true;
         }
 
-        // ──── Primary Indications من Pivot ────
-        // القديم: كان يجيبهم من product_primary_indications pivot
-        // الجديد: يجيبهم من health_product.primary_indications أو override
+        // ═══════════════════════════════════════════════════════════════════════
+        // ⚡ UPDATED: Primary Indications - من العلاقة belongsToMany أو override
+        // ═══════════════════════════════════════════════════════════════════════
+        // القديم: كان يجيبهم من health_product.primary_indications أو override
+        // الجديد: يجيبهم من override أو من العلاقة belongsToMany
         $primaryIndicationNames = [];
         if ($override && $override->primary_indications !== null) {
-            $primaryIndicationNames = $override->primary_indications;
-        } elseif ($health && $health->primary_indications) {
-            $primaryIndicationNames = $health->primary_indications;
+            $primaryIndicationNames = is_array($override->primary_indications)
+                ? array_values($override->primary_indications)
+                : [];
+        } else {
+            // اقرأ من العلاقة belongsToMany (تم eager-loadها في الاستعلام)
+            $primaryIndicationNames = $product->primaryIndications
+                ->pluck('name')
+                ->toArray();
         }
+        // ═══════════════════════════════════════════════════════════════════════
 
-        // ──── بناء الـ response ────
         $data = [
             'id'                  => $product->id,
             'sku'                 => $health?->sku ?? $product->sku,
@@ -497,33 +499,24 @@ class ProductApiController extends Controller
             'practitioner_slug'   => $company->slug,
             'description'         => strip_tags($merged->description ?? ''),
 
-            // التسعير
             'regular_price'       => $price,
             'sale_price'          => $salePrice > 0 ? $salePrice : null,
             'price'               => $finalPrice,
             'has_discount'        => $hasDiscount,
             'discount_percentage' => $discountPercentage,
 
-            // التصنيف
             'category'            => $merged->category->name ?? ($merged->category_name ?? 'other'),
             'category_id'         => $merged->category_id ?? null,
 
-            // الصورة
             'image_url'           => $imageUrl,
-
-            // الحالة
             'is_active'           => ($merged->status === 'active'),
             'stock_status'        => $merged->stock_status ?? 'in_stock',
-
-            // التاجات
             'tags'                => array_values($tags),
 
-            // معلومات إضافية
             'frequency'           => $product->frequency ?? null,
             'supplier'            => $product->brand?->name ?? null,
-            'pairs_well_with'     => [],  // غير مدعوم حالياً - يُضاف لاحقاً
+            'pairs_well_with'     => [],
 
-            // بيانات المنتج الصحي (مطابق للقديم)
             'ingredients'         => $health?->ingredients ?? null,
             'bottle_size'         => $health?->bottle_size ?? null,
             'bottle_size_unit'    => $health?->bottle_size_unit ?? null,
@@ -534,23 +527,17 @@ class ProductApiController extends Controller
             'contraindications'   => $override?->getEffectiveContraindications() ?? $health?->contraindications ?? null,
             'research'            => $override?->getEffectiveResearchLinks() ?? $health?->research_links ?? null,
 
-            // ملاحظات الممارس (حصري للشركة)
             'practitioner_notes'           => $override?->practitioner_notes ?? ($health?->practitioner_notes ?? null),
             'custom_primary_indications'   => $override?->custom_primary_indications ?? [],
             'custom_dosing_notes'          => $override?->custom_dosing_notes ?? ($health?->custom_dosing_notes ?? null),
 
-            // جدول الجرعات
             'dosing_schedule'     => $dosingSchedule,
             'dosing_na'           => $dosingNa,
 
-            // معرف الرسالة
             'message_id'          => $product->message_id,
-
-            // تاريخ التعديل
             'updated_at'          => $product->updated_at?->toIso8601String(),
         ];
 
-        // ──── بيانات إضافية لصفحة التفاصيل ────
         if ($includeDetails) {
             $data['stock_quantity'] = $override?->getEffectiveStock() ?? $product->stock_quantity;
             $data['additional_images'] = $product->getMedia('additional')
@@ -561,30 +548,19 @@ class ProductApiController extends Controller
             $data['brand'] = $product->brand?->name ?? null;
             $data['tax_rate'] = $product->tax?->rate ?? null;
             $data['full_description'] = $product->description;
+            // ⚡ NEW: IDs للـ indications (مفيد للـ desktop app)
+            $data['primary_indication_ids'] = $product->primaryIndications->pluck('id')->toArray();
         }
 
         return $data;
     }
 
-    /**
-     * دمج بيانات المنتج مع Override
-     * مطابق لـ getMergedProductData في المشروع القديم
-     *
-     * @param Product $product
-     * @param HealthProduct|null $health
-     * @param ProductCompanyOverride|null $override
-     * @return object
-     */
     private function mergeProductData(Product $product, ?HealthProduct $health, ?ProductCompanyOverride $override): object
     {
-        // نبدأ من بيانات المنتج الأساسية
         $mergedProduct = $product->toArray();
-
-        // نضيف علاقة التصنيف ككائن
         $mergedProduct['category'] = $product->category;
 
         if ($override) {
-            // ──── Override: وصف المنتج ────
             if ($override->description !== null) {
                 $mergedProduct['description'] = $override->description;
             }
@@ -602,15 +578,12 @@ class ProductApiController extends Controller
             }
             if ($override->category_id !== null) {
                 $mergedProduct['category_id'] = $override->category_id;
-                // تحديث كائن التصنيف
                 $category = \App\Models\Category::find($override->category_id);
                 if ($category) {
                     $mergedProduct['category'] = $category;
                 }
             }
         } else {
-            // بدون override - نستخدم بيانات المنتج الأصلية
-            // إذا في healthProduct، نستخدم وصفه إذا مختلف
             if ($health && $health->description !== null && $product->created_by == getSuperAdminCompanyId()) {
                 // للمنتجات المشتركة، الوصف يأتي من المنتج نفسه
             }

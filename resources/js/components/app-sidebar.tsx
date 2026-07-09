@@ -77,6 +77,16 @@ export function AppSidebar() {
             icon: Tag,
         },
 
+            {
+        title: t('Categories'),
+        href: route('categories.index'),
+        icon: Folder,
+    },
+    {
+        title: t('Supplier'),
+        href: route('brands.index'),
+        icon: ShoppingBag,
+    },
         {
             title: t('Currency'),
             href: route('currencies.index'),
@@ -258,7 +268,7 @@ export function AppSidebar() {
         }
         if (hasPermission(permissions, 'manage-brands')) {
             productSetupChildren.push({
-                title: t('Brands'),
+                title: t('Suppliers'),
                 href: route('brands.index')
             });
         }
