@@ -89,13 +89,13 @@ class ConfigController extends Controller
         }
 
         // Check if plan is expired
-        if ($user->plan_expire_date && $user->plan_expire_date < now()) {
-            return response()->json([
-                'success' => false,
-                'message' => __('Subscription has expired'),
-                'expired_at' => $user->plan_expire_date->format('Y-m-d'),
-            ], 403);
-        }
+        // if ($user->plan_expire_date && $user->plan_expire_date < now()) {
+        //     return response()->json([
+        //         'success' => false,
+        //         'message' => __('Subscription has expired'),
+        //         'expired_at' => $user->plan_expire_date->format('Y-m-d'),
+        //     ], 403);
+        // }
 
         $plan = $user->plan;
 
