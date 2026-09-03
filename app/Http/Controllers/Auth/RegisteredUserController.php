@@ -10,6 +10,7 @@ use App\Models\Referral;
 use App\Models\ReferralSetting;
 use App\Models\LeadStatus;
 use App\Models\OpportunityStage;
+use App\Models\PlanRequest;
 use App\Models\TaskStatus;
 use App\Services\UserService;
 use App\Services\LicenseKeyService;
@@ -180,12 +181,18 @@ class RegisteredUserController extends Controller
             }
         } else {
             // ──────────────────────────────────────────────────────────────
-            // مستخدم جديد - لازم يختار خطة ويتم إنشاء license جديدة
+            // مستخدم جديد - تعيين الخطة الافتراضية تلقائياً لمدة شهرين
             // ──────────────────────────────────────────────────────────────
-            $userData['plan_is_active'] = 0;
+            $defaultPlan = Plan::getDefaultPlan();
+            if ($defaultPlan) {
+                $userData['plan_id'] = $defaultPlan->id;
+                $userData['plan_is_active'] = 1;
+                $userData['plan_expire_date'] = now()->addMonths(2); // إضافة شهرين للخطة
+            } else {
+                $userData['plan_is_active'] = 0;
+            }
         }
 
-        // Handle referral code
         if ($request->referral_code) {
             $referrer = User::where('referral_code', $request->referral_code)
                 ->where('type', 'company')
@@ -212,6 +219,35 @@ class RegisteredUserController extends Controller
 
         Auth::login($user);
 
+        // ──────────────────────────────────────────────────────────────────
+        // توليد الـ License Key تلقائياً للمستخدم الجديد
+        // ──────────────────────────────────────────────────────────────────
+        if (!$isLegacyUser && !empty($user->plan_id)) {
+            $licenseService = app(LicenseKeyService::class);
+            $result = $licenseService->generateLicenseKey(
+                $user,
+                $user->plan_id,
+                'monthly' // القيمة الافتراضية المتوقعة في السيرفيس
+            );
+
+            if (isset($result['success']) && $result['success']) {
+                // تسجيل الطلب كأنه تمت الموافقة عليه (نفس سلوك زر Generate)
+                PlanRequest::create([
+                    'user_id' => $user->id,
+                    'plan_id' => $user->plan_id,
+                    'duration' => 'monthly',
+                    'status' => 'approved',
+                ]);
+                $user->refresh();
+            } else {
+                Log::error('RegisteredUserController: Failed to auto-generate license key for new user', [
+                    'user_id' => $user->id,
+                    'plan_id' => $user->plan_id,
+                    'result' => $result
+                ]);
+            }
+        }
+
         // Check if email verification is enabled
         $emailVerificationEnabled = getSetting('emailVerification', false);
         if ($emailVerificationEnabled) {
@@ -220,10 +256,9 @@ class RegisteredUserController extends Controller
         }
 
         // ──────────────────────────────────────────────────────────────────
-        // التوجيه حسب نوع المستخدم
+        // التوجيه النهائي حسب نوع المستخدم
         // ──────────────────────────────────────────────────────────────────
         if ($isLegacyUser) {
-            // مستخدم قديم → مباشرة للداشبورد، عنده license شغال
             Log::info('RegisteredUserController: Legacy user registered, redirecting to dashboard', [
                 'user_id' => $user->id,
                 'license_key' => $user->license_key,
@@ -233,8 +268,9 @@ class RegisteredUserController extends Controller
                 ->with('success', __('Your account has been created and your existing license has been linked successfully.'));
         }
 
-        // مستخدم جديد → يختار خطة
-        return redirect()->route('plans.index');
+        // مستخدم جديد → توجيه مباشرة لصفحة Key Generated Successfully 
+        return redirect()->route('license.show')
+            ->with('success', __('Your account has been created and your license key generated successfully.'));
     }
 
     /**

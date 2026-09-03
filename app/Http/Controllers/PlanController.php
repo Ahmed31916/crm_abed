@@ -99,19 +99,6 @@ class PlanController extends Controller
             });
         }
 
-        // For new users without a license key, render the select-plan page
-        if (!$isAdmin && !$hasLicenseKey && $user->type === 'company') {
-            return Inertia::render('plans/select-plan', [
-                'plans' => $plans,
-                'billingCycle' => $billingCycle,
-                'currentPlan' => $currentPlan,
-                'userTrialUsed' => $userTrialUsed,
-                'currency' => $currency,
-                'currencySymbol' => $currencySymbol,
-                'hasLicenseKey' => $hasLicenseKey,
-            ]);
-        }
-
         // For admin users or users with existing plans
         return Inertia::render('plans/index', [
             'plans' => $plans,

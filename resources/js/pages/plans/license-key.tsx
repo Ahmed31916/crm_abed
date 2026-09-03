@@ -82,31 +82,13 @@ export default function LicenseKey({
                         {t('License Key Generated Successfully!')}
                     </h1>
                     <p className="text-gray-600 dark:text-gray-400 text-lg">
-                        {t('Your subscription is now active. Please save your license key below.')}
+                        {t('Your license is active. Please save your license key below.')}
                     </p>
                 </div>
 
                 {/* Main Card */}
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-                    {/* Plan Info Header */}
-                    <div className="bg-gradient-to-r from-primary to-primary/80 p-6 text-white">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <div className="flex items-center gap-2 mb-1">
-                                    <Crown className="h-5 w-5" />
-                                    <span className="text-sm font-medium opacity-90">{t('Plan')}</span>
-                                </div>
-                                <h2 className="text-2xl font-bold">{planName}</h2>
-                            </div>
-                            <div className="text-right">
-                                <div className="text-3xl font-bold">
-                                    {currencySymbol}{planPrice}
-                                </div>
-                                <span className="text-sm opacity-90">/{t(planDuration.toLowerCase())}</span>
-                            </div>
-                        </div>
-                    </div>
-
+                     
                     {/* Details Section */}
                     <div className="p-6 space-y-6">
                         {/* Plan Details Grid */}
@@ -127,7 +109,7 @@ export default function LicenseKey({
                                 </div>
                                 <p className="text-sm font-semibold text-gray-900 dark:text-white">{expiresAt}</p>
                             </div>
-                            {isActivated && (
+                            {/* {isActivated && (
                                 <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4">
                                     <div className="flex items-center gap-2 text-green-600 dark:text-green-400 mb-1">
                                         <Check className="h-4 w-4" />
@@ -135,7 +117,7 @@ export default function LicenseKey({
                                     </div>
                                     <p className="text-sm font-semibold text-green-700 dark:text-green-300">{t('Activated')}</p>
                                 </div>
-                            )}
+                            )} */}
                            
                         </div>
 
@@ -147,7 +129,7 @@ export default function LicenseKey({
                             </label>
                             <div className="relative">
                                 <div className="flex items-center gap-2 bg-gray-900 dark:bg-gray-950 rounded-xl p-5 border-2 border-gray-700">
-                                    <code className="flex-1 text-center text-xl sm:text-2xl font-mono text-green-400 tracking-widest select-all break-all">
+                                    <code className="flex-1 text-center text-[1.4rem] font-mono text-green-400 tracking-widest select-all break-all">
                                         {licenseKey}
                                     </code>
                                     <Button
