@@ -218,6 +218,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('license/validate', [App\Http\Controllers\LicenseKeyController::class, 'validate'])->name('license.validate');
     Route::post('license/activate', [App\Http\Controllers\LicenseKeyController::class, 'activate'])->name('license.activate');
     Route::post('license/trial-request', [App\Http\Controllers\LicenseKeyController::class, 'submitTrialRequest'])->name('license.trial-request');
+    Route::get('license/show', [\App\Http\Controllers\LicenseKeyController::class, 'show'])->name('license.show');
 
     // Plans routes - accessible without plan check
     Route::get('plans', [PlanController::class, 'index'])->name('plans.index');
