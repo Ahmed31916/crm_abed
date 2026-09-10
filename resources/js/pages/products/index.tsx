@@ -469,13 +469,13 @@ export default function Products() {
             className: 'text-amber-500',
             requiredPermission: 'edit-products'
         },
-        {
-            label: t('Delete'),
-            icon: 'Trash2',
-            action: 'delete',
-            className: 'text-red-500',
-            requiredPermission: 'delete-products'
-        }
+        // {
+        //     label: t('Delete'),
+        //     icon: 'Trash2',
+        //     action: 'delete',
+        //     className: 'text-red-500',
+        //     requiredPermission: 'delete-products'
+        // }
     ];
 
     // Prepare filter options
