@@ -58,6 +58,10 @@ class ProductController extends Controller
         if ($request->filled('status') && $request->status !== 'all') {
             $query->where('status', $request->status);
         }
+        $status = $request->input('status', 'active');
+        if ($status !== 'all') {
+            $query->where('status', $status);
+        }
         if ($request->filled('stock_status') && $request->stock_status !== 'all') {
             $query->where('stock_status', $request->stock_status);
         }

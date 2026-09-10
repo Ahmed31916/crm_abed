@@ -32,7 +32,7 @@ export default function Products() {
     const [searchTerm, setSearchTerm] = useState(pageFilters.search || '');
     const [selectedCategory, setSelectedCategory] = useState(pageFilters.category || 'all');
     const [selectedBrand, setSelectedBrand] = useState(pageFilters.brand || 'all');
-    const [selectedStatus, setSelectedStatus] = useState(pageFilters.status || 'all');
+    const [selectedStatus, setSelectedStatus] = useState(pageFilters.status || 'active');
     const [selectedAssignee, setSelectedAssignee] = useState(pageFilters.assigned_to || 'all');
     // ⚡ NEW: Tags filter — يظهر للسوبر ادمن وللشركة
     const [selectedTag, setSelectedTag] = useState(pageFilters.tag || 'all');
@@ -65,7 +65,7 @@ export default function Products() {
         return searchTerm !== ''
             || selectedCategory !== 'all'
             || selectedBrand !== 'all'
-            || selectedStatus !== 'all'
+            || selectedStatus !== 'active'
             || selectedAssignee !== 'all'
             || selectedTag !== 'all'
             || (isSuperAdmin && selectedOwnership !== 'all')
@@ -76,7 +76,7 @@ export default function Products() {
     const activeFilterCount = () => {
         return (selectedCategory !== 'all' ? 1 : 0)
             + (selectedBrand !== 'all' ? 1 : 0)
-            + (selectedStatus !== 'all' ? 1 : 0)
+            + (selectedStatus !== 'active' ? 1 : 0)
             + (selectedAssignee !== 'all' ? 1 : 0)
             + (selectedTag !== 'all' ? 1 : 0)
             + (isSuperAdmin && selectedOwnership !== 'all' ? 1 : 0)
@@ -90,7 +90,7 @@ export default function Products() {
         search: searchTerm || undefined,
         category: selectedCategory !== 'all' ? selectedCategory : undefined,
         brand: selectedBrand !== 'all' ? selectedBrand : undefined,
-        status: selectedStatus !== 'all' ? selectedStatus : undefined,
+        status: selectedStatus,
         assigned_to: selectedAssignee !== 'all' ? selectedAssignee : undefined,
         // ⚡ NEW: tag filter
         tag: selectedTag !== 'all' ? selectedTag : undefined,
@@ -254,7 +254,7 @@ export default function Products() {
         setSearchTerm('');
         setSelectedCategory('all');
         setSelectedBrand('all');
-        setSelectedStatus('all');
+        setSelectedStatus('active');
         setSelectedAssignee('all');
         setSelectedTag('all');
         setSelectedOwnership('all');
