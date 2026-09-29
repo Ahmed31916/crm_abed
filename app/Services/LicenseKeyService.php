@@ -572,4 +572,95 @@ class LicenseKeyService
             ];
         }
     }
+
+        public function renewLicense(string $licenseId, string $newExpirationDate): array
+    {
+        if (empty($this->apiUrl)) {
+            return [
+                'success' => false,
+                'message' => __('License API is not configured. Please set VITAL_PROD_API_URL in .env'),
+            ];
+        }
+
+        try {
+            $payload = [
+                'licenseId' => $licenseId,
+                'newExpirationDate' => $newExpirationDate,
+            ];
+
+            Log::info('Vital API: Renewing license', [
+                'url' => $this->apiUrl . '/api/licenses/renew',
+                'license_id' => $licenseId,
+                'new_expiration' => $newExpirationDate,
+            ]);
+
+            $request = Http::withHeaders($this->getApiHeaders())
+                ->timeout($this->apiTimeout)
+                ->connectTimeout(10);
+            $request = $this->applySslSettings($request);
+            $response = $request->post($this->apiUrl . '/api/licenses/renew', $payload);
+
+            Log::info('Vital API: License renewal response', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+
+            if ($response->successful()) {
+                $data = $response->json();
+
+                Log::info('License renewed successfully via Vital API', [
+                    'license_id' => $licenseId,
+                    'new_expiration' => $newExpirationDate,
+                    'response' => $data,
+                ]);
+
+                return [
+                    'success' => true,
+                    'message' => __('License renewed successfully'),
+                    'data' => $data,
+                ];
+            }
+
+            $errorData = $response->json();
+            $errorMessage = $errorData['message']
+                ?? $errorData['title']
+                ?? __('Failed to renew license via API');
+
+            Log::error('Vital API license renewal error', [
+                'license_id' => $licenseId,
+                'status' => $response->status(),
+                'error' => $errorData,
+            ]);
+
+            return [
+                'success' => false,
+                'message' => $errorMessage,
+                'api_status' => $response->status(),
+                'api_error' => $errorData,
+            ];
+
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            Log::error('Vital API: Connection error during license renewal', [
+                'license_id' => $licenseId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => __('Could not connect to the license server. Error: :error', [
+                    'error' => $e->getMessage(),
+                ]),
+            ];
+        } catch (\Exception $e) {
+            Log::error('License renewal exception', [
+                'license_id' => $licenseId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => __('License server error: :error', ['error' => $e->getMessage()]),
+            ];
+        }
+    }
 }

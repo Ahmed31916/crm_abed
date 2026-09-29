@@ -1,9 +1,15 @@
 // pages/plans/plan-request.tsx
-// v6.8 — إضافات: زر View Details + زر Change Plan + إصلاحات v6.7 (Actions/Pagination/Per Page)
+// v6.9 — إضافات: زر Renew License + عمود Expiration Date + مودال اختيار التاريخ
+// ⚠️ تم الحفاظ على كل الكود الأصلي بالكامل، التعديلات المضافة فقط:
+//   1) زر Renew License في actions
+//   2) عمود Expiration Date في columns
+//   3) مودال Renew License
+//   4) state + handlers للـ renew license
 import { useState, useEffect } from 'react';
 import { PageTemplate } from '@/components/page-template';
 import { usePage, router } from '@inertiajs/react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { CrudTable } from '@/components/CrudTable';
 import { toast } from '@/components/custom-toast';
 import { useTranslation } from 'react-i18next';
@@ -103,6 +109,14 @@ export default function PlanRequestsPage() {
     const [newPlanId, setNewPlanId] = useState<string>('');
     const [changePlanSubmitting, setChangePlanSubmitting] = useState(false);
 
+    // ============================================================
+    // ⚡ NEW (v6.9): State — مودال تجديد الرخصة
+    // ============================================================
+    const [renewLicenseOpen, setRenewLicenseOpen] = useState(false);
+    const [renewLicenseItemId, setRenewLicenseItemId] = useState<number | null>(null);
+    const [renewLicenseDate, setRenewLicenseDate] = useState<string>('');
+    const [renewLicenseSubmitting, setRenewLicenseSubmitting] = useState(false);
+
     // مزامنة state محلية عند تغيّر pageFilters
     useEffect(() => {
         setSearchTerm(pageFilters.search || '');
@@ -171,7 +185,7 @@ export default function PlanRequestsPage() {
     };
 
     // ============================================================
-    // Actions handler — approve / reject / view / change-plan
+    // Actions handler — approve / reject / view / change-plan / renew-license
     // ============================================================
     const handleAction = (action: string, item: any) => {
         if (action === 'approve') {
@@ -206,6 +220,9 @@ export default function PlanRequestsPage() {
             openDetailsModal(item.id);
         } else if (action === 'change-plan') {
             openChangePlanModal(item);
+        } else if (action === 'renew-license') {
+            // ⚡ NEW (v6.9): فتح مودال تجديد الرخصة
+            openRenewLicenseModal(item);
         }
     };
 
@@ -307,10 +324,60 @@ export default function PlanRequestsPage() {
         );
     };
 
+    // ============================================================
+    // ⚡ NEW (v6.9): مودال تجديد الرخصة
+    // ============================================================
+    const openRenewLicenseModal = (item: any) => {
+        setRenewLicenseItemId(item.id);
+        // ⚡ القيمة الافتراضية: بعد شهر من تاريخ اليوم
+        const today = new Date();
+        const oneMonthLater = new Date(today);
+        oneMonthLater.setMonth(today.getMonth() + 1);
+        setRenewLicenseDate(oneMonthLater.toISOString().split('T')[0]); // YYYY-MM-DD
+        setRenewLicenseOpen(true);
+    };
+
+    const closeRenewLicenseModal = () => {
+        setRenewLicenseOpen(false);
+        setRenewLicenseItemId(null);
+        setRenewLicenseDate('');
+    };
+
+    const submitRenewLicense = () => {
+        if (!renewLicenseItemId) return;
+        if (!renewLicenseDate) {
+            toast.error(t('Please select an expiration date'));
+            return;
+        }
+
+        setRenewLicenseSubmitting(true);
+        if (!globalSettings?.is_demo) toast.loading(t('Renewing license...'));
+
+        router.post(
+            route('plan-requests.renew-license', renewLicenseItemId),
+            { new_expiration_date: renewLicenseDate },
+            {
+                onSuccess: (page) => {
+                    setRenewLicenseSubmitting(false);
+                    if (!globalSettings?.is_demo) toast.dismiss();
+                    if (page.props.flash?.success) toast.success(t(page.props.flash.success));
+                    else if (page.props.flash?.error) toast.error(t(page.props.flash.error));
+                    closeRenewLicenseModal();
+                },
+                onError: (errors) => {
+                    setRenewLicenseSubmitting(false);
+                    if (!globalSettings?.is_demo) toast.dismiss();
+                    if (typeof errors === 'string') toast.error(t(errors));
+                    else toast.error(t('Failed to renew license: {{errors}}', { errors: Object.values(errors).join(', ') }));
+                },
+            }
+        );
+    };
+
     const breadcrumbs = [
         { title: t('Dashboard'), href: route('dashboard') },
         { title: t('Plans'), href: route('plans.index') },
-        { title: t('Plan Requests') }
+        { title: t('License Manager') }
     ];
 
     // ============================================================
@@ -391,11 +458,39 @@ export default function PlanRequestsPage() {
             label: t('Request Date'),
             sortable: true,
             render: (value) => window.appSettings?.formatDateTime(value, false) || '-'
+        },
+        // ⚡ NEW (v6.9): عمود تاريخ انتهاء الاشتراك
+        {
+            key: 'user.plan_expire_date',
+            label: t('Expiration Date'),
+            render: (_, row) => {
+                const dateStr = row.user?.plan_expire_date;
+                if (!dateStr) return <span className="text-gray-400 text-xs">{t('Not set')}</span>;
+
+                const date = new Date(dateStr);
+                const now = new Date();
+                const isExpired = date < now;
+                const daysLeft = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+                return (
+                    <div className="flex flex-col gap-0.5">
+                        <span className={`text-sm font-medium ${isExpired ? 'text-red-600' : daysLeft <= 7 ? 'text-yellow-600' : 'text-gray-700 dark:text-gray-300'}`}>
+                            {window.appSettings?.formatDateTime(dateStr, false) || date.toLocaleDateString()}
+                        </span>
+                        {!isExpired && daysLeft <= 30 && (
+                            <span className="text-[10px] text-yellow-500">{t('{{days}} days left', { days: daysLeft })}</span>
+                        )}
+                        {isExpired && (
+                            <span className="text-[10px] text-red-500">{t('Expired')}</span>
+                        )}
+                    </div>
+                );
+            }
         }
     ];
 
     // ============================================================
-    // Actions — بدون شرط isSuperAdmin (يعتمد على permissions فقط)
+    // Actions — v6.9: أضفنا renew-license
     // v6.8: أضفنا "view" (Eye) و "change-plan" (Pencil/Edit)
     // ============================================================
     const actions = [
@@ -416,6 +511,15 @@ export default function PlanRequestsPage() {
             requiredPermission: 'approve-plan-requests',
             // يظهر لكل الطلبات (يمكن تقييدها بـ pending فقط إن رغبت)
             condition: () => true,
+        },
+        // ⚡ NEW (v6.9): زر تجديد الرخصة — يظهر فقط للطلبات الموافق عليها
+        {
+            label: t('Renew License'),
+            icon: 'CalendarCheck',
+            action: 'renew-license',
+            className: 'text-green-500',
+            requiredPermission: 'approve-plan-requests',
+            condition: (row) => row.status === 'approved',
         },
         {
             label: t('Approve'),
@@ -500,7 +604,7 @@ export default function PlanRequestsPage() {
     if (!userIsSuperAdmin) {
         return (
             <PageTemplate
-                title={t('Plan Requests')}
+                title={t('License Manager')}
                 url="/plan-requests"
                 breadcrumbs={breadcrumbs}
                 noPadding
@@ -531,7 +635,7 @@ export default function PlanRequestsPage() {
 
     return (
         <PageTemplate
-            title={t('Plan Requests')}
+            title={t('License Manager')}
             url="/plan-requests"
             breadcrumbs={breadcrumbs}
             noPadding
@@ -592,7 +696,7 @@ export default function PlanRequestsPage() {
                     to={planRequests?.to || 0}
                     total={planRequests?.total || 0}
                     links={planRequests?.links}
-                    entityName={t("plan requests")}
+                    entityName={t("License Manager")}
                     onPageChange={handlePageChange}
                 />
             </div>
@@ -824,6 +928,46 @@ export default function PlanRequestsPage() {
                             }
                         >
                             {changePlanSubmitting ? t('Saving...') : t('Save Changes')}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ============================================================ */}
+            {/* ⚡ NEW (v6.9): مودال تجديد الرخصة                           */}
+            {/* ============================================================ */}
+            <Dialog open={renewLicenseOpen} onOpenChange={(o) => o ? setRenewLicenseOpen(true) : closeRenewLicenseModal()}>
+                <DialogContent className="sm:max-w-[440px]">
+                    <DialogHeader>
+                        <DialogTitle>{t('Renew License')}</DialogTitle>
+                        <DialogDescription>
+                            {t('Select a new expiration date for this company\'s license. The default is one month from today.')}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <div className="space-y-2">
+                            <Label htmlFor="expiration-date">{t('New Expiration Date')}</Label>
+                            <Input
+                                id="expiration-date"
+                                type="date"
+                                value={renewLicenseDate}
+                                onChange={(e) => setRenewLicenseDate(e.target.value)}
+                                min={new Date().toISOString().split('T')[0]}
+                            />
+                            <p className="text-xs text-gray-500">
+                                {t('The license will be renewed until the selected date. This action cannot be undone.')}
+                            </p>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={closeRenewLicenseModal} disabled={renewLicenseSubmitting}>
+                            {t('Cancel')}
+                        </Button>
+                        <Button
+                            onClick={submitRenewLicense}
+                            disabled={renewLicenseSubmitting || !renewLicenseDate}
+                        >
+                            {renewLicenseSubmitting ? t('Renewing...') : t('Renew License')}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

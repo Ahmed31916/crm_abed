@@ -56,5 +56,5 @@ return [
         'password' => env('RABBITMQ_PASS'),
         'vhost' => env('RABBITMQ_VHOST'),
     ],
-
+ 
 ];

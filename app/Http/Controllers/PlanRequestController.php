@@ -277,4 +277,87 @@ class PlanRequestController extends BaseController
 
         return false;
     }
+
+        /**
+     * ════════════════════════════════════════════════════════════════════
+     * ⚡ NEW: تجديد رخصة الشركة لتاريخ انتهاء جديد
+     *
+     * - يستقبل licenseId + newExpirationDate
+     * - يستدعي LicenseApiService::renewLicense
+     * - يحدّث user.license_expiration_date في قاعدة البيانات المحلية
+     *
+     * Route:
+     *   Route::post('/plan-requests/{id}/renew-license', [PlanRequestController::class, 'renewLicense'])
+     *        ->name('plan-requests.renew-license');
+     * ════════════════════════════════════════════════════════════════════
+     */
+    public function renewLicense(Request $request, $id)
+    {
+        if (!$this->isSuperAdmin(Auth::user())) {
+            abort(403, __('Only super admins can renew licenses.'));
+        }
+
+        $validated = $request->validate([
+            'new_expiration_date' => 'required|date|after:today',
+        ]);
+
+        $planRequest = PlanRequest::with('user')->findOrFail($id);
+
+        if (!$planRequest->user) {
+            return redirect()->back()->with('error', __('User not found for this plan request.'));
+        }
+
+        $user = $planRequest->user;
+
+        // ✅ نستخدم license_id المخزّن عند المستخدم
+        // (موجود في $fillable حسب موديل User)
+        $licenseId = $user->license_id;
+
+        if (empty($licenseId)) {
+            return redirect()->back()->with('error', __('No license ID found for this user. Please ensure the user has been assigned a license first.'));
+        }
+
+        // تحويل التاريخ إلى صيغة ISO 8601 كما يتوقعها الـ API
+        $expirationDateIso = $validated['new_expiration_date'] . 'T00:00:00.000Z';
+
+        try {
+            // ⚡ نستخدم LicenseKeyService (الخدمة الصحيحة)
+            $licenseService = app(\App\Services\LicenseKeyService::class);
+            $result = $licenseService->renewLicense($licenseId, $expirationDateIso);
+
+            if (!$result['success']) {
+                return redirect()->back()->with('error', $result['message']);
+            }
+
+            Log::info('License renewed successfully', [
+                'plan_request_id' => $planRequest->id,
+                'user_id'         => $user->id,
+                'license_id'      => $licenseId,
+                'new_expiration'  => $validated['new_expiration_date'],
+                'api_response'    => $result,
+            ]);
+
+            // ⚡ حدّث plan_expire_date + plan_is_active في قاعدة البيانات المحلية
+            $user->update([
+                'plan_expire_date' => $validated['new_expiration_date'],
+                'plan_is_active'   => 1,
+            ]);
+
+            return redirect()->back()->with('success', __('License renewed successfully until :date', [
+                'date' => $validated['new_expiration_date'],
+            ]));
+
+        } catch (\Exception $e) {
+            Log::error('License renewal failed', [
+                'plan_request_id' => $planRequest->id,
+                'user_id'         => $user->id,
+                'license_id'      => $licenseId,
+                'error'           => $e->getMessage(),
+            ]);
+
+            return redirect()->back()->with('error', __('Failed to renew license: :error', [
+                'error' => $e->getMessage(),
+            ]));
+        }
+    }
 }

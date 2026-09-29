@@ -464,6 +464,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
             ->name('plan-requests.show')
             ->where('planRequest', '[0-9]+');
 
+        Route::post('/plan-requests/{id}/renew-license', [PlanRequestController::class, 'renewLicense'])->name('plan-requests.renew-license');
+
         // v6.8: تغيير خطة الطلب
         Route::put('plan-requests/{planRequest}/change-plan', [PlanRequestController::class, 'changePlan'])
             ->middleware('permission:approve-plan-requests')

@@ -15,7 +15,7 @@ class LicenseApiService
 
     public function __construct()
     {
-        $this->baseUrl = config('services.license_api.base_url');
+        $this->baseUrl = config('services.vital.prod_api_url');
         $this->username = config('services.license_api.username');
         $this->password = config('services.license_api.password');
         $this->productId = config('services.license_api.product_id');
@@ -123,12 +123,12 @@ class LicenseApiService
      * @return array
      * @throws \Exception
      */
-    public function renewLicense(string $licenseKey, string $expirationDate): array
+    public function renewLicense(string $licenseId, string $expirationDate): array
     {
         $token = $this->getAccessToken();
 
         $payload = [
-            'licenseKey' => $licenseKey,
+            'licenseId' => $licenseId,
             'newExpirationDate' => $expirationDate,
         ];
 
